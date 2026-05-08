@@ -3,3 +3,8 @@ export { classes } from './classes';
 export { subjects } from './subjects';
 export { students } from './students';
 export { attendanceRecords } from './attendance';
+export { users, DEMO_USER_BY_ROLE } from './users';
+export { rooms, roomMappings } from './rooms';
+export { tasks, taskCompletions } from './tasks';
+export { materials } from './materials';
+export { announcements, initialComments, initialLikes } from './announcements';

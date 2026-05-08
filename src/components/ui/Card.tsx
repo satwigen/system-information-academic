@@ -6,18 +6,22 @@ interface CardProps {
   className?: string;
   onClick?: () => void;
   hover?: boolean;
+  glass?: boolean;
 }
 
-export default function Card({ children, className, onClick, hover }: CardProps) {
+export default function Card({ children, className, onClick, hover, glass }: CardProps) {
   return (
     <div
+      onClick={onClick}
       className={cn(
-        'bg-white rounded-xl shadow-sm border border-slate-100 p-6',
-        hover && 'hover:shadow-md hover:border-slate-200 transition-all duration-200 cursor-pointer',
+        'rounded-2xl p-6 transition-all duration-200',
+        glass
+          ? 'bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-white/30 dark:border-slate-700/50 shadow-lg'
+          : 'bg-white dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/70 shadow-sm',
+        hover && 'hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer',
         onClick && 'cursor-pointer',
         className
       )}
-      onClick={onClick}
     >
       {children}
     </div>
