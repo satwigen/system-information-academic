@@ -1,126 +1,190 @@
-# Academic Information System (AIS)
+# SIAKAD — Sistem Informasi Akademik (v3.0)
 
-A comprehensive, role-based academic platform with a modern, premium design. Built with Next.js 14 App Router, TypeScript, Tailwind CSS, and Framer Motion.
+A full-stack, role-based academic information system. Next.js 14 App Router + Supabase (Postgres, Auth, Storage, RLS) + TypeScript + Tailwind + Framer Motion.
 
-> **v2.0 Revamp:** Now supports 4 roles (Admin, Head, Dosen, Student), Room Mapping, Tasks, Materials, Feed, and Profiles — with dark mode, Framer Motion navigation, and a Glassmorphic Floating Dock.
+---
 
-## Highlights
+## What ships in v3.0
 
-- **4 Roles with RBAC** — Admin, Lecturer (Head), Dosen (Faculty), Student
-- **Room Mapping System** — Admin assigns subjects to specific rooms, buildings, floors, and time slots
-- **Task Management** — Students toggle "Mark as Done" with progress rings
-- **Materials** — Dosen uploads, Students download (PDF, Slides, Videos, Links)
-- **Interactive Feed** — Announcements with like and comment
-- **Profile System** — Avatar upload, name, email, phone, address, bio
-- **Native Dark Mode** — Light/Dark/System, zero FOUC
-- **Hydration-Safe** — No `Math.random()` or `Date.now()` at module scope
-- **Glassmorphic Floating Dock** (mobile) + **Collapsible Sidebar** (desktop) with Framer Motion
-- **Premium Color Palette** — Indigo-600, Emerald-500, Violet-500, Deep Navy dark mode
+| Role | Primary responsibilities |
+|------|--------------------------|
+| **Admin** | Full CRUD on users, departments, classes, courses, rooms + mappings; super-power to edit/delete any feed post |
+| **Lecturer / Head** | Dashboard, Feed, Reports (with PDF + Print), Search — supervision only |
+| **Dosen (Faculty)** | Take attendance, upload materials (≤ 50 MB), create tasks, post feed |
+| **Student** | Read-only attendance view, view/download materials, mark tasks as done, interact with feed |
 
-## Tech Stack
+Core features:
 
-| Layer | Tech |
-|-------|------|
-| Framework | Next.js 14 (App Router) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v3.4 (darkMode: class) |
-| Animation | Framer Motion |
-| Icons | Lucide-React |
-| ORM (future) | Prisma |
-| Database (future) | Supabase / Postgres |
-| Auth (future) | Supabase Auth + RLS |
+- Real **Supabase Auth** login with role-aware redirects
+- **Row-Level Security** enforced at the database layer
+- **Server Components** + **Server Actions** (no client-side mock data, no global `DataContext`)
+- **Room Mapping** with auto-expiry in **Asia/Jakarta** timezone (admin bypass)
+- **Upload progress bar** for materials via XHR `upload.onprogress`
+- **PDF export** via `@react-pdf/renderer`, server-rendered
+- **Print** stylesheet for in-browser printing
+- **Dark mode** with zero hydration flicker (inline `<script>` in `<head>`)
+- **Framer Motion** animations in sidebar, dock, dialogs, and page transitions
 
-## Getting Started
+---
+
+## Quick Start
+
+### 1. Install
 
 ```bash
 npm install
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.local.example .env.local
+```
+
+Fill in from your Supabase project settings → API:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://<project>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<publishable or anon key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role key — server only>
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+CRON_SECRET=<any random string>
+```
+
+### 3. Apply the database schema
+
+Run in order in the Supabase SQL Editor:
+
+1. `supabase/migrations/0001_init.sql` — tables, enums, views, triggers, RLS
+2. `supabase/migrations/0002_storage.sql` — `avatars` (public) and `materials` (private) buckets + policies
+3. `supabase/seed.sql` — reference data: 3 departments, 9 classes, 9 subjects, 8 rooms, 8 mappings
+
+### 4. Seed demo users
+
+```bash
+npm run seed:users
+```
+
+This calls `supabase.auth.admin.createUser()` for each demo account and wires their `profiles` row (department, class, NIM/NIP).
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin   | `admin@siakad.test`   | `Admin#123`   |
+| Head    | `head@siakad.test`    | `Head#123`    |
+| Dosen   | `dosen@siakad.test`   | `Dosen#123`   |
+| Student | `student@siakad.test` | `Student#123` |
+
+### 5. Run the app
+
+```bash
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000 — you'll land on `/login`.
 
-**Use the Role Switcher in the sidebar** to view the system as Admin, Head, Dosen, or Student.
+---
 
-## Project Structure
+## Project Layout
 
 ```
-academic-presence-system/
-├── docs/
-│   ├── PRD.md
-│   └── ARCHITECTURE.md
-├── prisma/
-│   └── schema.prisma           # DB source-of-truth (11 models, 4 enums)
+siakad/
+├── docs/                          # PRD, ARCHITECTURE, SUPABASE_SETUP, API_ROUTES
+├── supabase/
+│   ├── migrations/                # 0001_init.sql, 0002_storage.sql
+│   └── seed.sql                   # reference data
+├── scripts/
+│   └── seed-users.ts              # demo-account seeder (service-role)
+├── prisma/schema.prisma           # reference (source-of-truth is SQL)
 ├── src/
-│   ├── app/                    # Next.js App Router
-│   │   ├── layout.tsx          # Shell + providers + theme init script
-│   │   ├── page.tsx            # Role-adaptive dashboard
-│   │   ├── attendance/         # Dosen takes attendance
-│   │   ├── materials/          # Upload / download
-│   │   ├── feed/               # Announcements + likes + comments
-│   │   ├── tasks/              # "Mark as Done" progress
-│   │   ├── reports/            # Head + Admin summaries
-│   │   ├── search/             # Find students
-│   │   ├── profile/            # Personal info + avatar
-│   │   └── admin/
-│   │       ├── users/          # User management
-│   │       ├── departments/    # Department management
-│   │       └── rooms/          # Room Mapping System
+│   ├── middleware.ts              # session refresh + role gate
+│   ├── app/
+│   │   ├── (auth)/                # login, forgot-password, reset
+│   │   ├── (app)/                 # protected pages — inherit AppShell
+│   │   │   ├── admin/             # users / departments / classes / subjects / rooms
+│   │   │   ├── attendance /       # DOSEN write, STUDENT read-only
+│   │   │   ├── materials  /       # DOSEN upload, STUDENT+DOSEN download
+│   │   │   ├── feed /             # admin can edit/delete any post
+│   │   │   ├── tasks /            # STUDENT-only mark-as-done
+│   │   │   ├── reports /          # + PDF export + Print
+│   │   │   ├── search /
+│   │   │   ├── profile /
+│   │   │   └── page.tsx           # role-adaptive dashboard
+│   │   ├── auth/callback/         # Supabase PKCE code exchange
+│   │   └── api/
+│   │       ├── attendance/roster/
+│   │       ├── avatars/upload/
+│   │       ├── materials/upload/
+│   │       ├── materials/[id]/download/
+│   │       └── reports/[type]/pdf/
+│   ├── actions/                   # server actions by entity
 │   ├── components/
-│   │   ├── layout/
-│   │   │   ├── AppShell.tsx
-│   │   │   ├── Sidebar.tsx        # Collapsible, Framer Motion
-│   │   │   ├── FloatingDock.tsx   # Glassmorphic mobile dock
-│   │   │   ├── MobileTopBar.tsx
-│   │   │   ├── Header.tsx
-│   │   │   ├── ThemeToggle.tsx
-│   │   │   └── RoleSwitcher.tsx
-│   │   ├── ui/                   # Card, Button, Avatar, ProgressRing, etc.
-│   │   └── domain/               # StatsCard, DepartmentCard
-│   ├── context/
-│   │   ├── ThemeContext.tsx     # Light/Dark/System
-│   │   ├── AuthContext.tsx      # Active role + user + profile update
-│   │   └── DataContext.tsx      # Rooms, tasks, materials, feed, attendance
-│   └── lib/
-│       ├── data/                # Deterministic mock data
-│       ├── types.ts             # Mirrors prisma schema
-│       ├── rbac.ts              # Role → allowed nav
-│       └── utils.ts
+│   │   ├── layout/                # Sidebar, FloatingDock, MobileTopBar, MinuteTick
+│   │   ├── ui/                    # Card, Button, Dialog, Toast, Input, Select, ...
+│   │   └── domain/                # StatsCard, ConfirmButton
+│   ├── lib/
+│   │   ├── supabase/              # client.ts, server.ts, admin.ts, middleware.ts
+│   │   ├── validation/            # Zod schemas
+│   │   ├── auth.ts                # requireSession, requireRole
+│   │   ├── rbac.ts                # nav + canAccess
+│   │   ├── time.ts                # Jakarta time + isRoomSlotExpired
+│   │   └── utils.ts
+│   └── types/database.ts          # DB types (mirror of SQL)
+├── next.config.js
+├── tailwind.config.ts
+├── tsconfig.json
+└── package.json
 ```
 
-## Hydration-Safe Patterns
+---
 
-Three layers prevent the "Hydration failed" error that plagued v1:
+## Role → Access matrix
 
-1. **Deterministic PRNG (Mulberry32)** replaces `Math.random()` in mock data — see `src/lib/data/attendance.ts`.
-2. **Inline theme init script** in `<head>` applies the `dark` class before React hydrates — see `src/app/layout.tsx`.
-3. **`ClientOnly` wrapper** defers client-only content (relative timestamps, theme toggle visuals) until after mount — see `src/components/ui/ClientOnly.tsx`.
+| Feature | Admin | Head | Dosen | Student |
+|---|:---:|:---:|:---:|:---:|
+| Dashboard | ✅ | ✅ | ✅ | ✅ |
+| Attendance (write) | ✅ | — | ✅ | — |
+| Attendance (view own) | ✅ | — | ✅ | ✅ (read-only) |
+| Attendance (view dept) | ✅ | ✅ | — | — |
+| Materials upload | ✅ | — | ✅ | — |
+| Materials download | ✅ | — | ✅ | ✅ |
+| Feed post | ✅ | ✅ | ✅ | — |
+| Feed edit/delete ANY post | ✅ | — | — | — |
+| Tasks create | ✅ | — | ✅ | — |
+| Tasks mark-as-done | — | — | — | ✅ |
+| Reports view + export | ✅ | ✅ | ✅ | — |
+| Search users | ✅ | ✅ | ✅ | — |
+| Admin CRUD | ✅ | — | — | — |
 
-## Design Tokens
+Enforced at three layers: **middleware** → **page-level redirect** → **RLS policies**.
 
-| Token | Light | Dark | Usage |
-|-------|-------|------|-------|
-| Primary | `#4F46E5` (Indigo-600) | Indigo-500 | Brand, CTAs |
-| Accent | `#8B5CF6` (Violet-500) | Violet-400 | Interactive highlights |
-| Success | `#10B981` (Emerald-500) | Emerald-400 | Attendance / Task Done |
-| Background | `#F8FAFC` (Slate-50) | `#0F172A` (Deep Navy) | Page bg |
-| Surface | `#FFFFFF` | Slate-800 | Cards |
+---
 
-Cards use `rounded-2xl`, `backdrop-blur-xl` for glass variants, `shadow-lg` for elevated elements.
+## Hydration Safety Rules
 
-## Future Backend Integration
+- No `Math.random()` at module scope.
+- No `Date.now()` at initial render.
+- `toLocaleDateString` is banned — use `formatDate` / `formatDateJakarta` from `lib/time.ts`.
+- Theme class is applied by an inline `<script>` in `<head>` before React hydrates.
+- Relative timestamps live inside `<ClientOnly>`.
 
-The `prisma/schema.prisma` is the source-of-truth for a production deploy:
+---
 
-1. Set up a Supabase project and run `npx prisma migrate dev`.
-2. Replace the mock `DataProvider` with Supabase queries (or server actions).
-3. Enable Row-Level Security for RBAC at the database level.
-4. Use Supabase Storage for avatar and material file uploads.
+## Scripts
 
-## Demo User Accounts (via Role Switcher)
+```bash
+npm run dev         # Next.js dev server
+npm run build       # production build
+npm run start       # production server
+npm run lint        # Next ESLint
+npm run typecheck   # tsc --noEmit
+npm run seed:users  # create demo accounts in Supabase
+```
 
-| Role | Demo Name | Email |
-|------|-----------|-------|
-| Admin   | Sarah Admin             | admin@campus.ac.id |
-| Head    | Dr. Ahmad Wibowo        | dr.wibowo@campus.ac.id |
-| Dosen   | Yudi Permana, M.Kom     | yudi.permana@campus.ac.id |
-| Student | Ahmad Rizki Pratama     | ahmad.rizki@student.ac.id |
+---
+
+## Docs
+
+- `docs/PRD.md` — product requirements
+- `docs/ARCHITECTURE.md` — system design
+- `docs/SUPABASE_SETUP.md` — full SQL schema documentation
+- `docs/API_ROUTES.md` — every server action + route handler contract

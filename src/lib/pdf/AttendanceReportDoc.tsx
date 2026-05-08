@@ -1,0 +1,118 @@
+/* eslint-disable jsx-a11y/alt-text */
+import React from 'react';
+import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+
+const styles = StyleSheet.create({
+  page: { padding: 32, fontSize: 10, fontFamily: 'Helvetica', color: '#0F172A' },
+  header: { borderBottomWidth: 2, borderBottomColor: '#4F46E5', paddingBottom: 10, marginBottom: 16 },
+  title: { fontSize: 18, fontWeight: 700, marginBottom: 2 },
+  subtitle: { fontSize: 10, color: '#64748B' },
+  meta: { marginTop: 6, fontSize: 9, color: '#64748B' },
+  sectionTitle: { fontSize: 12, fontWeight: 700, marginBottom: 8, marginTop: 12 },
+  row: { flexDirection: 'row', borderBottomWidth: 0.5, borderBottomColor: '#E2E8F0', paddingVertical: 6 },
+  headRow: { flexDirection: 'row', backgroundColor: '#F1F5F9', paddingVertical: 6, paddingHorizontal: 4, marginTop: 4 },
+  cell: { flexGrow: 1, flexBasis: 0, paddingHorizontal: 4 },
+  cellSm: { width: 48, paddingHorizontal: 4, textAlign: 'center' },
+  cellNum: { width: 40, paddingHorizontal: 4, textAlign: 'right' },
+  totalRow: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#0F172A', marginTop: 4, paddingVertical: 4, fontWeight: 700 },
+  footer: { position: 'absolute', bottom: 20, left: 32, right: 32, textAlign: 'center', fontSize: 8, color: '#94A3B8' },
+  legend: { flexDirection: 'row', gap: 12, fontSize: 8, color: '#64748B', marginTop: 8 },
+});
+
+export interface ReportRow {
+  class_name: string;
+  department_name: string;
+  subject_name: string;
+  subject_code: string;
+  total: number;
+  present: number;
+  late: number;
+  sick: number;
+  absent: number;
+  rate_pct: number;
+}
+
+interface Props {
+  title: string;
+  filterLabel: string;
+  generatedAtLabel: string;
+  rows: ReportRow[];
+}
+
+export default function AttendanceReportDoc({ title, filterLabel, generatedAtLabel, rows }: Props) {
+  const totals = rows.reduce(
+    (acc, r) => {
+      acc.total += r.total; acc.present += r.present; acc.late += r.late;
+      acc.sick += r.sick; acc.absent += r.absent;
+      return acc;
+    },
+    { total: 0, present: 0, late: 0, sick: 0, absent: 0 },
+  );
+  const overallRate = totals.total === 0 ? 0 : Math.round(((totals.present + totals.late) / totals.total) * 100);
+
+  return (
+    <Document>
+      <Page size="A4" style={styles.page}>
+        <View style={styles.header}>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.subtitle}>SIAKAD · Sistem Informasi Akademik</Text>
+          <Text style={styles.meta}>
+            Filter: {filterLabel} · Generated: {generatedAtLabel}
+          </Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Summary</Text>
+        <View style={styles.row}>
+          <Text style={styles.cell}>Overall attendance rate</Text>
+          <Text style={[styles.cellNum, { width: 80 }]}>{overallRate}%</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.cell}>Total records</Text>
+          <Text style={[styles.cellNum, { width: 80 }]}>{totals.total}</Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>Per Class / Subject</Text>
+        <View style={styles.headRow}>
+          <Text style={styles.cell}>Department · Class</Text>
+          <Text style={styles.cell}>Subject</Text>
+          <Text style={styles.cellSm}>Total</Text>
+          <Text style={styles.cellSm}>Present</Text>
+          <Text style={styles.cellSm}>Late</Text>
+          <Text style={styles.cellSm}>Sick</Text>
+          <Text style={styles.cellSm}>Absent</Text>
+          <Text style={styles.cellSm}>Rate</Text>
+        </View>
+        {rows.map((r, i) => (
+          <View style={styles.row} key={i}>
+            <Text style={styles.cell}>{r.department_name} · {r.class_name}</Text>
+            <Text style={styles.cell}>{r.subject_code} · {r.subject_name}</Text>
+            <Text style={styles.cellSm}>{r.total}</Text>
+            <Text style={styles.cellSm}>{r.present}</Text>
+            <Text style={styles.cellSm}>{r.late}</Text>
+            <Text style={styles.cellSm}>{r.sick}</Text>
+            <Text style={styles.cellSm}>{r.absent}</Text>
+            <Text style={styles.cellSm}>{r.rate_pct}%</Text>
+          </View>
+        ))}
+        <View style={styles.totalRow}>
+          <Text style={styles.cell}>TOTALS</Text>
+          <Text style={styles.cell}></Text>
+          <Text style={styles.cellSm}>{totals.total}</Text>
+          <Text style={styles.cellSm}>{totals.present}</Text>
+          <Text style={styles.cellSm}>{totals.late}</Text>
+          <Text style={styles.cellSm}>{totals.sick}</Text>
+          <Text style={styles.cellSm}>{totals.absent}</Text>
+          <Text style={styles.cellSm}>{overallRate}%</Text>
+        </View>
+
+        <View style={styles.legend}>
+          <Text>Rate = (Present + Late) / Total × 100%</Text>
+        </View>
+
+        <Text style={styles.footer}>
+          Generated by SIAKAD · All times Asia/Jakarta (UTC+7)
+        </Text>
+      </Page>
+    </Document>
+  );
+}

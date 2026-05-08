@@ -13,7 +13,6 @@
     @apply bg-[#0F172A] text-slate-100;
   }
 
-  /* Smooth theme transition for common surface colors (but NOT layout). */
   html, body, .theme-transition {
     transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
   }
@@ -25,5 +24,23 @@
 
   .glass {
     @apply bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border border-white/30 dark:border-slate-700/50;
+  }
+}
+
+/* Print stylesheet for reports */
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .no-print, aside, nav, .floating-dock, header button {
+    display: none !important;
+  }
+  .print-block {
+    page-break-inside: avoid;
+  }
+  main {
+    margin: 0 !important;
+    padding: 0 !important;
   }
 }

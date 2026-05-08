@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Sun, Moon } from 'lucide-react';
-import { useTheme } from '@/context/ThemeContext';
+import { useTheme } from '@/components/theme/ThemeProvider';
 import ClientOnly from '@/components/ui/ClientOnly';
 
 function ThemeButton() {
@@ -20,7 +20,6 @@ function ThemeButton() {
 }
 
 export default function ThemeToggle() {
-  // Render a neutral placeholder on the server; swap in the real button after hydration.
   return (
     <ClientOnly
       fallback={

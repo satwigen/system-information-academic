@@ -4,19 +4,24 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GraduationCap, ChevronLeft, ChevronRight } from 'lucide-react';
+import { GraduationCap, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/context/AuthContext';
-import { navForRole } from '@/lib/rbac';
+import { navForRole, roleLabel } from '@/lib/rbac';
+import type { UserRole } from '@/types/database';
 import Avatar from '@/components/ui/Avatar';
-import RoleSwitcher from './RoleSwitcher';
 import ThemeToggle from './ThemeToggle';
+import { signOutAction } from '@/actions/auth';
 
-export default function Sidebar() {
+interface SidebarProps {
+  role: UserRole;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null;
+}
+
+export default function Sidebar({ role, fullName, email, avatarUrl }: SidebarProps) {
   const pathname = usePathname();
-  const { user, role } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-
   const items = navForRole(role);
 
   return (
@@ -28,7 +33,7 @@ export default function Sidebar() {
     >
       {/* Brand */}
       <div className="p-4 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between">
-        <motion.div className="flex items-center gap-3 overflow-hidden">
+        <div className="flex items-center gap-3 overflow-hidden">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-indigo-500/30">
             <GraduationCap className="w-5 h-5 text-white" />
           </div>
@@ -40,12 +45,14 @@ export default function Sidebar() {
                 exit={{ opacity: 0, x: -10 }}
                 className="min-w-0"
               >
-                <h1 className="font-bold text-slate-900 dark:text-white leading-tight">AIS</h1>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">Academic System</p>
+                <h1 className="font-bold text-slate-900 dark:text-white leading-tight">SIAKAD</h1>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                  {roleLabel(role)}
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
+        </div>
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -58,7 +65,7 @@ export default function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto scrollbar-hide">
         {items.map((item) => {
-          const isActive = pathname === item.href;
+          const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href + '/'));
           const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href} className="block relative">
@@ -69,7 +76,7 @@ export default function Sidebar() {
                   'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors relative',
                   isActive
                     ? 'text-indigo-600 dark:text-indigo-300'
-                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-slate-800/70',
                 )}
               >
                 {isActive && (
@@ -100,21 +107,33 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="p-3 border-t border-slate-200/80 dark:border-slate-800 space-y-2">
-        {!collapsed && <RoleSwitcher />}
         <div className={cn('flex items-center gap-2', collapsed && 'flex-col')}>
           <ThemeToggle />
           {!collapsed && (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Avatar name={user.profile.fullName} size="sm" />
+              <Avatar name={fullName} src={avatarUrl} size="sm" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
-                  {user.profile.fullName}
+                  {fullName}
                 </p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{email}</p>
               </div>
             </div>
           )}
         </div>
+        <form action={signOutAction}>
+          <button
+            type="submit"
+            className={cn(
+              'w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-300 transition-colors',
+              collapsed && 'justify-center',
+            )}
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+            {!collapsed && <span>Sign out</span>}
+          </button>
+        </form>
       </div>
     </motion.aside>
   );

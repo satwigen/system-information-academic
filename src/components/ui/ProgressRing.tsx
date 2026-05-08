@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface ProgressRingProps {
-  value: number; // 0-100
+  value: number;
   size?: number;
   stroke?: number;
   colorClass?: string;
