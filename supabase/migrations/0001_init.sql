@@ -1,15 +1,17 @@
 -- =====================================================================
 -- SIAKAD v3.0 — Initial schema
--- Run this in Supabase SQL editor (or: supabase db push).
+-- Run this in the Supabase SQL editor (or: supabase db push).
+--
+-- ORDER MATTERS:
+--   1. Enums and set_updated_at() (no table deps).
+--   2. Tables (so the SQL-language helper functions validate).
+--   3. Helper functions that read from public.profiles.
+--   4. Triggers, views, RLS policies.
 -- =====================================================================
 
--- Extensions
 create extension if not exists "pgcrypto";
 
--- =====================================================================
--- ENUMS
--- =====================================================================
-
+-- ---------- ENUMS ----------
 do $$ begin
   create type public.user_role as enum ('ADMIN', 'HEAD', 'DOSEN', 'STUDENT');
 exception when duplicate_object then null; end $$;
@@ -26,10 +28,7 @@ do $$ begin
   create type public.material_type as enum ('PDF', 'SLIDE', 'VIDEO', 'LINK', 'DOCUMENT');
 exception when duplicate_object then null; end $$;
 
--- =====================================================================
--- HELPER FUNCTIONS (security definer so they bypass RLS for their reads)
--- =====================================================================
-
+-- ---------- set_updated_at (no table deps; safe early) ----------
 create or replace function public.set_updated_at() returns trigger
 language plpgsql as $$
 begin
@@ -37,6 +36,202 @@ begin
   return new;
 end;
 $$;
+
+-- =====================================================================
+-- TABLES (created FIRST so helper functions can reference them later)
+-- =====================================================================
+
+create table if not exists public.departments (
+  id           uuid primary key default gen_random_uuid(),
+  code         text not null unique,
+  name         text not null,
+  description  text,
+  icon         text,
+  head_id      uuid,  -- FK added later (circular with profiles)
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create table if not exists public.classes (
+  id             uuid primary key default gen_random_uuid(),
+  department_id  uuid not null references public.departments(id) on delete restrict,
+  name           text not null,
+  semester       int  not null check (semester between 1 and 14),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  unique (department_id, name)
+);
+create index if not exists idx_classes_department_id on public.classes (department_id);
+
+create table if not exists public.subjects (
+  id             uuid primary key default gen_random_uuid(),
+  department_id  uuid not null references public.departments(id) on delete restrict,
+  code           text not null unique,
+  name           text not null,
+  credits        int  not null check (credits between 1 and 10),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists idx_subjects_department_id on public.subjects (department_id);
+
+create table if not exists public.profiles (
+  id             uuid primary key references auth.users(id) on delete cascade,
+  role           public.user_role not null default 'STUDENT',
+  full_name      text not null,
+  email          text not null unique,
+  phone          text,
+  address        text,
+  avatar_url     text,
+  bio            text,
+  class_id       uuid references public.classes(id) on delete set null,
+  department_id  uuid references public.departments(id) on delete set null,
+  nim            text unique,
+  nip            text unique,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists idx_profiles_role          on public.profiles (role);
+create index if not exists idx_profiles_department_id on public.profiles (department_id);
+create index if not exists idx_profiles_class_id      on public.profiles (class_id);
+
+-- Deferred FK: departments.head_id -> profiles.id
+do $$ begin
+  alter table public.departments
+    add constraint departments_head_fk foreign key (head_id)
+    references public.profiles(id) on delete set null;
+exception when duplicate_object then null; end $$;
+create index if not exists idx_departments_head_id on public.departments (head_id);
+
+create table if not exists public.rooms (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  building    text not null,
+  floor       int  not null,
+  capacity    int  not null check (capacity > 0),
+  type        public.room_type not null default 'CLASSROOM',
+  notes       text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (building, floor, name)
+);
+
+create table if not exists public.room_mappings (
+  id           uuid primary key default gen_random_uuid(),
+  room_id      uuid not null references public.rooms(id)    on delete cascade,
+  subject_id   uuid not null references public.subjects(id) on delete cascade,
+  class_id     uuid not null references public.classes(id)  on delete cascade,
+  day_of_week  int  not null check (day_of_week between 0 and 6),
+  start_time   time not null,
+  end_time     time not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint room_mappings_time_order check (end_time > start_time),
+  constraint room_mappings_unique_slot unique (room_id, day_of_week, start_time)
+);
+create index if not exists idx_room_mappings_class_id   on public.room_mappings (class_id);
+create index if not exists idx_room_mappings_subject_id on public.room_mappings (subject_id);
+create index if not exists idx_room_mappings_room_id    on public.room_mappings (room_id);
+create index if not exists idx_room_mappings_day        on public.room_mappings (day_of_week);
+
+create table if not exists public.attendance_records (
+  id               uuid primary key default gen_random_uuid(),
+  student_id       uuid not null references public.profiles(id) on delete cascade,
+  class_id         uuid not null references public.classes(id)  on delete cascade,
+  subject_id       uuid not null references public.subjects(id) on delete cascade,
+  session_date     date not null,
+  status           public.attendance_status not null,
+  recorded_by_id   uuid not null references public.profiles(id) on delete restrict,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  unique (student_id, class_id, subject_id, session_date)
+);
+create index if not exists idx_att_student_id  on public.attendance_records (student_id);
+create index if not exists idx_att_class_date  on public.attendance_records (class_id, session_date);
+create index if not exists idx_att_subject_id  on public.attendance_records (subject_id);
+
+create table if not exists public.materials (
+  id               uuid primary key default gen_random_uuid(),
+  class_id         uuid not null references public.classes(id)  on delete cascade,
+  subject_id       uuid not null references public.subjects(id) on delete cascade,
+  session_date     date not null,
+  title            text not null,
+  description      text,
+  file_type        public.material_type not null default 'PDF',
+  file_path        text not null,
+  file_size_bytes  bigint check (file_size_bytes <= 52428800),  -- 50 MB
+  mime_type        text,
+  uploaded_by_id   uuid not null references public.profiles(id) on delete restrict,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists idx_materials_class_id     on public.materials (class_id);
+create index if not exists idx_materials_subject_id   on public.materials (subject_id);
+create index if not exists idx_materials_session_date on public.materials (session_date);
+
+create table if not exists public.tasks (
+  id             uuid primary key default gen_random_uuid(),
+  class_id       uuid not null references public.classes(id)  on delete cascade,
+  subject_id     uuid not null references public.subjects(id) on delete cascade,
+  title          text not null,
+  description    text not null,
+  due_date       timestamptz not null,
+  created_by_id  uuid not null references public.profiles(id) on delete restrict,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists idx_tasks_class_id on public.tasks (class_id);
+create index if not exists idx_tasks_due_date on public.tasks (due_date);
+
+create table if not exists public.student_tasks (
+  id          uuid primary key default gen_random_uuid(),
+  task_id     uuid not null references public.tasks(id)    on delete cascade,
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  is_done     boolean not null default false,
+  done_at     timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique (task_id, user_id)
+);
+create index if not exists idx_student_tasks_user_id on public.student_tasks (user_id);
+create index if not exists idx_student_tasks_task_id on public.student_tasks (task_id);
+
+create table if not exists public.announcements (
+  id             uuid primary key default gen_random_uuid(),
+  author_id      uuid not null references public.profiles(id) on delete cascade,
+  class_id       uuid references public.classes(id)       on delete set null,
+  department_id  uuid references public.departments(id)   on delete set null,
+  title          text not null,
+  body           text not null,
+  pinned         boolean not null default false,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists idx_announcements_class_id      on public.announcements (class_id);
+create index if not exists idx_announcements_department_id on public.announcements (department_id);
+create index if not exists idx_announcements_created_at    on public.announcements (created_at desc);
+
+create table if not exists public.likes (
+  id               uuid primary key default gen_random_uuid(),
+  announcement_id  uuid not null references public.announcements(id) on delete cascade,
+  user_id          uuid not null references public.profiles(id)      on delete cascade,
+  created_at       timestamptz not null default now(),
+  unique (announcement_id, user_id)
+);
+create index if not exists idx_likes_announcement_id on public.likes (announcement_id);
+
+create table if not exists public.comments (
+  id               uuid primary key default gen_random_uuid(),
+  announcement_id  uuid not null references public.announcements(id) on delete cascade,
+  user_id          uuid not null references public.profiles(id)      on delete cascade,
+  body             text not null,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index if not exists idx_comments_announcement_id on public.comments (announcement_id);
+
+-- =====================================================================
+-- HELPER FUNCTIONS (defined AFTER public.profiles exists)
+-- =====================================================================
 
 create or replace function public.auth_role() returns public.user_role
 language sql stable security definer set search_path = public as $$
@@ -74,215 +269,9 @@ language sql stable security definer set search_path = public as $$
 $$;
 
 -- =====================================================================
--- TABLES
--- =====================================================================
-
--- -------- departments (defined before profiles so FK works) --------
-create table if not exists public.departments (
-  id           uuid primary key default gen_random_uuid(),
-  code         text not null unique,
-  name         text not null,
-  description  text,
-  icon         text,
-  head_id      uuid,  -- FK added later (circular with profiles)
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-
--- -------- classes --------
-create table if not exists public.classes (
-  id             uuid primary key default gen_random_uuid(),
-  department_id  uuid not null references public.departments(id) on delete restrict,
-  name           text not null,
-  semester       int  not null check (semester between 1 and 14),
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now(),
-  unique (department_id, name)
-);
-create index if not exists idx_classes_department_id on public.classes (department_id);
-
--- -------- subjects (courses) --------
-create table if not exists public.subjects (
-  id             uuid primary key default gen_random_uuid(),
-  department_id  uuid not null references public.departments(id) on delete restrict,
-  code           text not null unique,
-  name           text not null,
-  credits        int  not null check (credits between 1 and 10),
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
-);
-create index if not exists idx_subjects_department_id on public.subjects (department_id);
-
--- -------- profiles (1:1 with auth.users) --------
-create table if not exists public.profiles (
-  id             uuid primary key references auth.users(id) on delete cascade,
-  role           public.user_role not null default 'STUDENT',
-  full_name      text not null,
-  email          text not null unique,
-  phone          text,
-  address        text,
-  avatar_url     text,
-  bio            text,
-  class_id       uuid references public.classes(id) on delete set null,
-  department_id  uuid references public.departments(id) on delete set null,
-  nim            text unique,
-  nip            text unique,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
-);
-create index if not exists idx_profiles_role          on public.profiles (role);
-create index if not exists idx_profiles_department_id on public.profiles (department_id);
-create index if not exists idx_profiles_class_id      on public.profiles (class_id);
-
--- Add the deferred FK from departments.head_id -> profiles.id
-do $$ begin
-  alter table public.departments
-    add constraint departments_head_fk foreign key (head_id)
-    references public.profiles(id) on delete set null;
-exception when duplicate_object then null; end $$;
-create index if not exists idx_departments_head_id on public.departments (head_id);
-
--- -------- rooms --------
-create table if not exists public.rooms (
-  id          uuid primary key default gen_random_uuid(),
-  name        text not null,
-  building    text not null,
-  floor       int  not null,
-  capacity    int  not null check (capacity > 0),
-  type        public.room_type not null default 'CLASSROOM',
-  notes       text,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
-  unique (building, floor, name)
-);
-
--- -------- room_mappings --------
-create table if not exists public.room_mappings (
-  id           uuid primary key default gen_random_uuid(),
-  room_id      uuid not null references public.rooms(id)    on delete cascade,
-  subject_id   uuid not null references public.subjects(id) on delete cascade,
-  class_id     uuid not null references public.classes(id)  on delete cascade,
-  day_of_week  int  not null check (day_of_week between 0 and 6),
-  start_time   time not null,
-  end_time     time not null,
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now(),
-  constraint room_mappings_time_order check (end_time > start_time),
-  constraint room_mappings_unique_slot unique (room_id, day_of_week, start_time)
-);
-create index if not exists idx_room_mappings_class_id   on public.room_mappings (class_id);
-create index if not exists idx_room_mappings_subject_id on public.room_mappings (subject_id);
-create index if not exists idx_room_mappings_room_id    on public.room_mappings (room_id);
-create index if not exists idx_room_mappings_day        on public.room_mappings (day_of_week);
-
--- -------- attendance_records --------
-create table if not exists public.attendance_records (
-  id               uuid primary key default gen_random_uuid(),
-  student_id       uuid not null references public.profiles(id) on delete cascade,
-  class_id         uuid not null references public.classes(id)  on delete cascade,
-  subject_id       uuid not null references public.subjects(id) on delete cascade,
-  session_date     date not null,
-  status           public.attendance_status not null,
-  recorded_by_id   uuid not null references public.profiles(id) on delete restrict,
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now(),
-  unique (student_id, class_id, subject_id, session_date)
-);
-create index if not exists idx_att_student_id  on public.attendance_records (student_id);
-create index if not exists idx_att_class_date  on public.attendance_records (class_id, session_date);
-create index if not exists idx_att_subject_id  on public.attendance_records (subject_id);
-
--- -------- materials --------
-create table if not exists public.materials (
-  id               uuid primary key default gen_random_uuid(),
-  class_id         uuid not null references public.classes(id)  on delete cascade,
-  subject_id       uuid not null references public.subjects(id) on delete cascade,
-  session_date     date not null,
-  title            text not null,
-  description      text,
-  file_type        public.material_type not null default 'PDF',
-  file_path        text not null,
-  file_size_bytes  bigint check (file_size_bytes <= 52428800),  -- 50 MB
-  mime_type        text,
-  uploaded_by_id   uuid not null references public.profiles(id) on delete restrict,
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now()
-);
-create index if not exists idx_materials_class_id     on public.materials (class_id);
-create index if not exists idx_materials_subject_id   on public.materials (subject_id);
-create index if not exists idx_materials_session_date on public.materials (session_date);
-
--- -------- tasks --------
-create table if not exists public.tasks (
-  id             uuid primary key default gen_random_uuid(),
-  class_id       uuid not null references public.classes(id)  on delete cascade,
-  subject_id     uuid not null references public.subjects(id) on delete cascade,
-  title          text not null,
-  description    text not null,
-  due_date       timestamptz not null,
-  created_by_id  uuid not null references public.profiles(id) on delete restrict,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
-);
-create index if not exists idx_tasks_class_id on public.tasks (class_id);
-create index if not exists idx_tasks_due_date on public.tasks (due_date);
-
--- -------- student_tasks --------
-create table if not exists public.student_tasks (
-  id          uuid primary key default gen_random_uuid(),
-  task_id     uuid not null references public.tasks(id)    on delete cascade,
-  user_id     uuid not null references public.profiles(id) on delete cascade,
-  is_done     boolean not null default false,
-  done_at     timestamptz,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
-  unique (task_id, user_id)
-);
-create index if not exists idx_student_tasks_user_id on public.student_tasks (user_id);
-create index if not exists idx_student_tasks_task_id on public.student_tasks (task_id);
-
--- -------- announcements --------
-create table if not exists public.announcements (
-  id             uuid primary key default gen_random_uuid(),
-  author_id      uuid not null references public.profiles(id) on delete cascade,
-  class_id       uuid references public.classes(id)       on delete set null,
-  department_id  uuid references public.departments(id)   on delete set null,
-  title          text not null,
-  body           text not null,
-  pinned         boolean not null default false,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
-);
-create index if not exists idx_announcements_class_id      on public.announcements (class_id);
-create index if not exists idx_announcements_department_id on public.announcements (department_id);
-create index if not exists idx_announcements_created_at    on public.announcements (created_at desc);
-
--- -------- likes --------
-create table if not exists public.likes (
-  id               uuid primary key default gen_random_uuid(),
-  announcement_id  uuid not null references public.announcements(id) on delete cascade,
-  user_id          uuid not null references public.profiles(id)      on delete cascade,
-  created_at       timestamptz not null default now(),
-  unique (announcement_id, user_id)
-);
-create index if not exists idx_likes_announcement_id on public.likes (announcement_id);
-
--- -------- comments --------
-create table if not exists public.comments (
-  id               uuid primary key default gen_random_uuid(),
-  announcement_id  uuid not null references public.announcements(id) on delete cascade,
-  user_id          uuid not null references public.profiles(id)      on delete cascade,
-  body             text not null,
-  created_at       timestamptz not null default now(),
-  updated_at       timestamptz not null default now()
-);
-create index if not exists idx_comments_announcement_id on public.comments (announcement_id);
-
--- =====================================================================
 -- TRIGGERS
 -- =====================================================================
 
--- updated_at triggers
 drop trigger if exists trg_profiles_updated_at on public.profiles;
 create trigger trg_profiles_updated_at before update on public.profiles
   for each row execute function public.set_updated_at();
@@ -383,12 +372,12 @@ create or replace view public.attendance_stats_by_class as
   select
     class_id,
     subject_id,
-    count(*)                                                                                  as total,
-    count(*) filter (where status = 'PRESENT')                                                as present,
-    count(*) filter (where status = 'LATE')                                                   as late,
-    count(*) filter (where status = 'SICK')                                                   as sick,
-    count(*) filter (where status = 'ABSENT')                                                 as absent,
-    round(100.0 * count(*) filter (where status in ('PRESENT','LATE')) / count(*), 1)         as rate_pct
+    count(*)                                                                          as total,
+    count(*) filter (where status = 'PRESENT')                                        as present,
+    count(*) filter (where status = 'LATE')                                           as late,
+    count(*) filter (where status = 'SICK')                                           as sick,
+    count(*) filter (where status = 'ABSENT')                                         as absent,
+    round(100.0 * count(*) filter (where status in ('PRESENT','LATE')) / count(*), 1) as rate_pct
   from public.attendance_records
   group by class_id, subject_id;
 
