@@ -1,6 +1,6 @@
 {
-  "name": "academic-presence-system",
-  "version": "1.0.0",
+  "name": "academic-information-system",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,7 +12,8 @@
     "next": "^14.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "lucide-react": "^0.400.0"
+    "lucide-react": "^0.400.0",
+    "framer-motion": "^11.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

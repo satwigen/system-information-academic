@@ -1,48 +1,40 @@
-# Architecture Design Document
-## Academic Presence System
+# Architecture Design — AIS v2.0
 
 ---
 
-## 1. System Architecture
-
-### 1.1 High-Level Architecture
+## 1. High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Client (Browser)                       │
-├─────────────────────────────────────────────────────────┤
-│                                                          │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │  Dashboard   │  │  Attendance  │  │    Reports    │  │
-│  │    Page      │  │     Page     │  │     Page      │  │
-│  └─────────────┘  └──────────────┘  └───────────────┘  │
-│                                                          │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │              Shared Components Layer                  ││
-│  │  (Layout, Sidebar, Cards, Buttons, Search)           ││
-│  └─────────────────────────────────────────────────────┘│
-│                                                          │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │              State Management (Context)              ││
-│  └─────────────────────────────────────────────────────┘│
-│                                                          │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │              Data Layer (Mock Data / Lib)            ││
-│  └─────────────────────────────────────────────────────┘│
-│                                                          │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     Client (Browser)                           │
+├──────────────────────────────────────────────────────────────┤
+│  AppShell                                                      │
+│  ├── ThemeProvider (light/dark)                                │
+│  ├── AuthProvider (role: admin|head|dosen|student)             │
+│  ├── DataProvider (departments, rooms, tasks, materials, ...)  │
+│  │                                                             │
+│  ├── Desktop: Collapsible Sidebar (Framer Motion)              │
+│  ├── Mobile:  Floating Glassmorphic Dock (bottom)              │
+│  │                                                             │
+│  └── Page Router (App Router)                                  │
+│      ├── /              → Role-adaptive Dashboard              │
+│      ├── /attendance    → Dosen                                │
+│      ├── /materials     → Dosen + Student                      │
+│      ├── /feed          → All (Student can like/comment)       │
+│      ├── /tasks         → Student                              │
+│      ├── /reports       → Head + Admin                         │
+│      ├── /admin/users   → Admin                                │
+│      ├── /admin/rooms   → Admin (Room Mapping)                 │
+│      └── /profile       → All                                  │
+│                                                                │
+├──────────────────────────────────────────────────────────────┤
+│          Future Backend (Prisma + Supabase)                    │
+│  ├── Postgres (via Supabase)                                   │
+│  ├── Row-Level Security = RBAC                                 │
+│  ├── Supabase Storage (material files, avatars)                │
+│  └── Supabase Auth (email + magic link)                        │
+└──────────────────────────────────────────────────────────────┘
 ```
-
-### 1.2 Technology Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Framework | Next.js 14 (App Router) | SSR, routing, React framework |
-| Styling | Tailwind CSS | Utility-first CSS |
-| Icons | Lucide-React | Consistent icon set |
-| Language | TypeScript | Type safety |
-| State | React Context + useState | Client-side state |
-| Data | JSON mock data | Development data source |
 
 ---
 
@@ -53,247 +45,260 @@ academic-presence-system/
 ├── docs/
 │   ├── PRD.md
 │   └── ARCHITECTURE.md
+├── prisma/
+│   └── schema.prisma            # DB source-of-truth (future migration)
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx              # Root layout with sidebar
-│   │   ├── page.tsx                # Dashboard (home page)
-│   │   ├── globals.css             # Global styles
-│   │   ├── attendance/
-│   │   │   └── page.tsx            # Attendance management page
-│   │   ├── reports/
-│   │   │   └── page.tsx            # Summary reports page
-│   │   └── search/
-│   │       └── page.tsx            # Search & filter page
+│   │   ├── layout.tsx           # Shell: providers + sidebar + dock
+│   │   ├── page.tsx             # Dashboard (role-adaptive)
+│   │   ├── globals.css
+│   │   ├── attendance/page.tsx
+│   │   ├── materials/page.tsx
+│   │   ├── feed/page.tsx
+│   │   ├── tasks/page.tsx
+│   │   ├── reports/page.tsx
+│   │   ├── search/page.tsx
+│   │   ├── profile/page.tsx
+│   │   └── admin/
+│   │       ├── users/page.tsx
+│   │       ├── departments/page.tsx
+│   │       └── rooms/page.tsx
 │   ├── components/
 │   │   ├── layout/
-│   │   │   ├── Sidebar.tsx         # Navigation sidebar
-│   │   │   └── Header.tsx          # Page header component
+│   │   │   ├── AppShell.tsx
+│   │   │   ├── Sidebar.tsx
+│   │   │   ├── FloatingDock.tsx
+│   │   │   ├── Header.tsx
+│   │   │   ├── ThemeToggle.tsx
+│   │   │   └── RoleSwitcher.tsx
 │   │   ├── ui/
-│   │   │   ├── Card.tsx            # Reusable card component
-│   │   │   ├── Button.tsx          # Button variants
-│   │   │   ├── Select.tsx          # Select dropdown
-│   │   │   ├── Badge.tsx           # Status badge
-│   │   │   └── SearchInput.tsx     # Search input field
-│   │   ├── dashboard/
-│   │   │   ├── StatsCard.tsx       # Statistics card
-│   │   │   └── DepartmentCard.tsx  # Department overview card
-│   │   ├── attendance/
-│   │   │   ├── StudentRow.tsx      # Student attendance row
-│   │   │   └── StatusButton.tsx    # Attendance status button
-│   │   └── reports/
-│   │       ├── ReportCard.tsx      # Report summary card
-│   │       └── AttendanceChart.tsx # Visual chart component
-│   ├── lib/
-│   │   ├── data/
-│   │   │   ├── departments.ts     # Department mock data
-│   │   │   ├── classes.ts         # Classes mock data
-│   │   │   ├── subjects.ts        # Subjects mock data
-│   │   │   ├── students.ts        # Students mock data
-│   │   │   └── attendance.ts      # Attendance records
-│   │   ├── types.ts               # TypeScript type definitions
-│   │   └── utils.ts               # Utility functions
-│   └── context/
-│       └── AttendanceContext.tsx   # Global attendance state
-├── public/
-│   └── favicon.ico
+│   │   │   ├── Card.tsx
+│   │   │   ├── Button.tsx
+│   │   │   ├── Badge.tsx
+│   │   │   ├── Select.tsx
+│   │   │   ├── SearchInput.tsx
+│   │   │   ├── Avatar.tsx
+│   │   │   ├── ProgressRing.tsx
+│   │   │   └── ClientOnly.tsx   # Hydration-safe wrapper
+│   │   └── domain/
+│   │       ├── DepartmentCard.tsx
+│   │       ├── StatsCard.tsx
+│   │       ├── TaskCard.tsx
+│   │       ├── MaterialCard.tsx
+│   │       ├── AnnouncementCard.tsx
+│   │       └── RoomCard.tsx
+│   ├── context/
+│   │   ├── ThemeContext.tsx
+│   │   ├── AuthContext.tsx      # Active role + user
+│   │   └── DataContext.tsx      # Renamed from AttendanceContext
+│   └── lib/
+│       ├── data/                # Deterministic mock data
+│       ├── types.ts
+│       ├── rbac.ts              # Role → allowed nav items
+│       └── utils.ts
 ├── package.json
-├── tailwind.config.ts
+├── tailwind.config.ts           # darkMode: 'class'
 ├── tsconfig.json
 └── next.config.js
 ```
 
 ---
 
-## 3. Component Architecture
+## 3. Database Schema (Prisma)
 
-### 3.1 Layout Hierarchy
+```prisma
+// See prisma/schema.prisma for full source
 
-```
-RootLayout
-├── Sidebar (fixed left)
-│   ├── Logo/Brand
-│   ├── Navigation Items
-│   │   ├── Dashboard
-│   │   ├── Attendance
-│   │   ├── Reports
-│   │   └── Search
-│   └── User Info (placeholder)
-└── Main Content Area
-    ├── Header (page title + actions)
-    └── Page Content (dynamic)
-```
+model User {
+  id          String   @id
+  role        Role
+  email       String   @unique
+  profile     Profile?
+  classId     String?
+  class       Class?   @relation(fields: [classId], references: [id])
+  deptId      String?
+  dept        Department? @relation(fields: [deptId], references: [id])
+  tasks       TaskCompletion[]
+  comments    Comment[]
+  likes       Like[]
+  attendance  AttendanceRecord[]
+}
 
-### 3.2 Page Components
+model Profile {
+  userId    String  @id
+  user      User    @relation(fields: [userId], references: [id])
+  fullName  String
+  phone     String?
+  address   String?
+  avatarUrl String?
+}
 
-#### Dashboard Page
-```
-DashboardPage
-├── Header ("Dashboard")
-├── StatsRow
-│   ├── StatsCard (Total Students)
-│   ├── StatsCard (Total Classes)
-│   ├── StatsCard (Avg Attendance)
-│   └── StatsCard (Today's Sessions)
-└── DepartmentGrid
-    ├── DepartmentCard (Information Technology)
-    ├── DepartmentCard (Informatics)
-    └── DepartmentCard (Digital Business)
-```
+enum Role { ADMIN  HEAD  DOSEN  STUDENT }
 
-#### Attendance Page
-```
-AttendancePage
-├── Header ("Attendance")
-├── SelectionBar
-│   ├── Select (Department)
-│   ├── Select (Class)
-│   ├── Select (Subject)
-│   └── DatePicker
-├── ActionBar
-│   ├── Button (Mark All Present)
-│   └── Button (Save)
-└── StudentList
-    └── StudentRow (× N)
-        ├── StudentInfo (name, NIM)
-        └── StatusButtons (Present|Late|Sick|Absent)
-```
+model Department { id, name, code, headId }
+model Class      { id, deptId, name, semester }
+model Subject    { id, deptId, name, code, credits }
 
-#### Reports Page
-```
-ReportsPage
-├── Header ("Reports")
-├── FilterBar
-│   ├── Select (Department)
-│   └── Select (Class)
-└── ReportGrid
-    └── ReportCard (× N)
-        ├── ClassInfo
-        ├── AttendanceChart (bar/donut)
-        └── StatusBreakdown
-```
+model Room {
+  id       String @id
+  name     String   // "Lab 1"
+  building String   // "Building A"
+  floor    Int      // 2
+  capacity Int
+  type     RoomType
+}
+enum RoomType { LAB  CLASSROOM  AUDITORIUM }
 
-#### Search Page
-```
-SearchPage
-├── Header ("Search")
-├── SearchBar
-│   ├── SearchInput
-│   └── FilterDropdown (Department)
-└── ResultsList
-    └── StudentCard (× N)
-        ├── StudentInfo
-        ├── DepartmentBadge
-        └── AttendanceOverview
+model RoomMapping {
+  id        String @id
+  roomId    String
+  subjectId String
+  classId   String
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  @@unique([roomId, classId, dayOfWeek, startTime])
+}
+
+model Task {
+  id         String @id
+  subjectId  String
+  title      String
+  description String
+  dueDate    DateTime
+  createdBy  String
+  completions TaskCompletion[]
+}
+model TaskCompletion {
+  id        String @id
+  taskId    String
+  userId    String
+  done      Boolean @default(false)
+  doneAt    DateTime?
+  @@unique([taskId, userId])
+}
+
+model Material {
+  id        String @id
+  subjectId String
+  title     String
+  fileUrl   String
+  fileType  String
+  uploadedBy String
+  createdAt DateTime @default(now())
+}
+
+model Announcement {
+  id        String @id
+  authorId  String
+  classId   String?
+  deptId    String?
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+  comments  Comment[]
+  likes     Like[]
+}
+model Like    { id, announcementId, userId, createdAt }
+model Comment { id, announcementId, userId, body, createdAt }
+
+model AttendanceRecord {
+  id         String @id
+  studentId  String
+  classId    String
+  subjectId  String
+  date       String
+  status     AttendanceStatus
+  recordedBy String
+}
+enum AttendanceStatus { PRESENT  LATE  SICK  ABSENT }
 ```
 
 ---
 
-## 4. Data Flow
+## 4. Hydration-Safe Strategy
 
-### 4.1 State Management
+### 4.1 The Problem
+The previous `attendance.ts` mock used `Math.random()` at module load time. When Next.js pre-renders the page on the server and hydrates on the client, the two random outputs differ → **hydration mismatch**.
 
-```
-AttendanceContext (Provider)
-├── State:
-│   ├── departments[]
-│   ├── classes[]
-│   ├── subjects[]
-│   ├── students[]
-│   ├── attendanceRecords[]
-│   ├── selectedDepartment
-│   ├── selectedClass
-│   └── selectedSubject
-├── Actions:
-│   ├── setDepartment(id)
-│   ├── setClass(id)
-│   ├── setSubject(id)
-│   ├── markAttendance(studentId, status)
-│   ├── markAllPresent(classId)
-│   ├── saveAttendance()
-│   └── getReport(classId)
-└── Computed:
-    ├── filteredStudents
-    ├── attendanceStats
-    └── classReport
-```
+### 4.2 The Fix (3 layers)
 
-### 4.2 Mock Data Strategy
-- All data stored as TypeScript constants in `/src/lib/data/`
-- Each department has 2-3 classes
-- Each class has 8-12 students
-- Pre-generated attendance records for demonstration
-- Data is loaded into context on app initialization
+1. **Deterministic mock data** — replace `Math.random()` with a seeded pseudo-random function so server and client produce identical arrays.
+   ```ts
+   // Mulberry32 deterministic PRNG
+   function seeded(seed: number) {
+     return () => {
+       seed = (seed + 0x6D2B79F5) | 0;
+       let t = seed;
+       t = Math.imul(t ^ (t >>> 15), t | 1);
+       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+     };
+   }
+   ```
+
+2. **`ClientOnly` wrapper** — for UI that inherently varies (current date, theme class before mount), render only after `useEffect` runs.
+   ```tsx
+   export default function ClientOnly({ children, fallback = null }) {
+     const [mounted, setMounted] = useState(false);
+     useEffect(() => setMounted(true), []);
+     return mounted ? <>{children}</> : <>{fallback}</>;
+   }
+   ```
+
+3. **Theme class applied via `<script>` in `<head>`** — prevents FOUC and matches SSR HTML.
+
+### 4.3 Forbidden during SSR
+- `Math.random()` at module scope
+- `Date.now()` / `new Date()` for initial state
+- `window`, `document`, `localStorage` at render time
+- Any conditional rendering based on `typeof window`
 
 ---
 
-## 5. Design System
+## 5. RBAC (Role-Based Access Control)
 
-### 5.1 Color Tokens
-
-```css
-/* Primary Palette */
---color-navy:        #1E293B;   /* Primary text, headers */
---color-navy-light:  #334155;   /* Secondary elements */
---color-slate:       #64748B;   /* Body text, descriptions */
---color-slate-light: #94A3B8;   /* Placeholder, disabled */
-
-/* Accent */
---color-blue:        #3B82F6;   /* Primary buttons, links */
---color-blue-hover:  #2563EB;   /* Button hover state */
---color-blue-light:  #EFF6FF;   /* Blue tint backgrounds */
-
-/* Backgrounds */
---color-bg:          #F8FAFC;   /* Page background */
---color-surface:     #FFFFFF;   /* Card background */
---color-border:      #E2E8F0;   /* Borders, dividers */
-
-/* Status Colors */
---color-present:     #10B981;   /* Green - Present */
---color-late:        #F59E0B;   /* Amber - Late */
---color-sick:        #8B5CF6;   /* Purple - Sick */
---color-absent:      #EF4444;   /* Red - Absent */
+```ts
+// src/lib/rbac.ts
+export const navByRole = {
+  ADMIN:   ['dashboard','users','departments','rooms','reports','profile'],
+  HEAD:    ['dashboard','reports','feed','materials','profile'],
+  DOSEN:   ['dashboard','attendance','materials','feed','tasks','profile'],
+  STUDENT: ['dashboard','materials','feed','tasks','attendance','profile'],
+};
 ```
 
-### 5.2 Typography Scale
-- **H1:** 2rem (32px), font-bold, navy
-- **H2:** 1.5rem (24px), font-semibold, navy
-- **H3:** 1.25rem (20px), font-medium, navy
-- **Body:** 1rem (16px), font-normal, slate
-- **Small:** 0.875rem (14px), font-normal, slate-light
-
-### 5.3 Component Styling Patterns
-- **Cards:** `bg-white rounded-xl shadow-sm border border-slate-100 p-6`
-- **Buttons:** `px-4 py-2 rounded-lg font-medium transition-all`
-- **Inputs:** `border border-slate-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500`
-- **Sidebar:** `bg-slate-900 text-white w-64 fixed h-full`
+Each page performs `useAuth()` → checks `role` → renders content or redirects.
 
 ---
 
-## 6. Routing
+## 6. Navigation UX
 
-| Route | Page | Description |
-|-------|------|-------------|
-| `/` | Dashboard | Home with stats and department overview |
-| `/attendance` | Attendance | Take/manage attendance |
-| `/reports` | Reports | View summary reports |
-| `/search` | Search | Search and filter students |
+### Desktop Sidebar
+- Width 256px (expanded) / 72px (collapsed)
+- Toggle with Framer Motion `layout` prop for smooth width animation
+- Icons always visible; labels fade in when expanded
+- Role-filtered nav items
 
----
-
-## 7. Responsive Design
-
-| Breakpoint | Layout |
-|-----------|--------|
-| Mobile (< 768px) | Sidebar collapses to hamburger menu, single column |
-| Tablet (768-1024px) | Sidebar visible, 2-column grid |
-| Desktop (> 1024px) | Full sidebar, 3-4 column grid |
+### Mobile Floating Dock
+- Fixed bottom-center, `backdrop-blur-xl`, `rounded-2xl`
+- 5 primary icons with active indicator (Framer Motion `layoutId`)
+- Glassmorphic: `bg-white/70 dark:bg-slate-900/70 border border-white/20`
 
 ---
 
-## 8. Future Considerations (Out of Scope)
-- Authentication & authorization
-- Database integration (PostgreSQL/MongoDB)
-- API routes for CRUD operations
-- Export to CSV/PDF
-- Email notifications for absence
-- Real-time updates with WebSockets
+## 7. Theme System
+
+- `next-themes` pattern with `darkMode: 'class'` in Tailwind
+- Inline `<script>` in `<head>` sets `<html class="dark">` before React hydrates
+- `ThemeProvider` exposes `theme` and `setTheme`
+- `localStorage` persistence
+
+---
+
+## 8. Future Extensions (Out of current scope)
+- Real Supabase auth integration
+- Real-time feed updates via Supabase Realtime
+- File uploads to Supabase Storage
+- Email notifications on new announcements
+- Exporting reports to PDF

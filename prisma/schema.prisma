@@ -1,0 +1,286 @@
+// Academic Information System — Database Schema
+// Source-of-truth for future Supabase/Postgres migration.
+// Current app uses mock data in src/lib/data/* mirroring these relations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================================================================
+// ENUMS
+// =====================================================================
+
+enum Role {
+  ADMIN
+  HEAD
+  DOSEN
+  STUDENT
+}
+
+enum RoomType {
+  LAB
+  CLASSROOM
+  AUDITORIUM
+  SEMINAR_ROOM
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  SICK
+  ABSENT
+}
+
+enum MaterialType {
+  PDF
+  SLIDE
+  VIDEO
+  LINK
+  DOCUMENT
+}
+
+// =====================================================================
+// USER & PROFILE
+// =====================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  role          Role
+  // Optional assignments
+  classId       String?
+  deptId        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  profile              Profile?
+  class                Class?            @relation("ClassStudents", fields: [classId], references: [id])
+  department           Department?       @relation("DeptMembers", fields: [deptId], references: [id])
+  headedDepartment     Department?       @relation("DeptHead")
+  announcements        Announcement[]
+  comments             Comment[]
+  likes                Like[]
+  taskCompletions      TaskCompletion[]
+  createdTasks         Task[]            @relation("TaskCreator")
+  uploadedMaterials    Material[]        @relation("MaterialUploader")
+  recordedAttendance   AttendanceRecord[] @relation("AttendanceRecorder")
+  ownAttendance        AttendanceRecord[] @relation("AttendanceStudent")
+
+  @@index([role])
+  @@index([deptId])
+}
+
+model Profile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fullName  String
+  phone     String?
+  address   String?
+  avatarUrl String?
+  bio       String?
+  updatedAt DateTime @updatedAt
+}
+
+// =====================================================================
+// ACADEMIC STRUCTURE
+// =====================================================================
+
+model Department {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  icon        String?
+  headId      String?  @unique
+  head        User?    @relation("DeptHead", fields: [headId], references: [id])
+  members     User[]   @relation("DeptMembers")
+  classes     Class[]
+  subjects    Subject[]
+}
+
+model Class {
+  id           String   @id @default(cuid())
+  deptId       String
+  department   Department @relation(fields: [deptId], references: [id])
+  name         String
+  semester     Int
+  students     User[]   @relation("ClassStudents")
+  roomMappings RoomMapping[]
+  attendance   AttendanceRecord[]
+  announcements Announcement[]
+
+  @@unique([deptId, name])
+}
+
+model Subject {
+  id           String   @id @default(cuid())
+  deptId       String
+  department   Department @relation(fields: [deptId], references: [id])
+  name         String
+  code         String   @unique
+  credits      Int
+  roomMappings RoomMapping[]
+  tasks        Task[]
+  materials    Material[]
+  attendance   AttendanceRecord[]
+}
+
+// =====================================================================
+// ROOM MAPPING SYSTEM (Admin feature)
+// =====================================================================
+
+model Room {
+  id       String   @id @default(cuid())
+  name     String                   // "Lab 1", "Room 304"
+  building String                   // "Building A"
+  floor    Int                      // 2
+  capacity Int
+  type     RoomType
+  notes    String?
+  mappings RoomMapping[]
+
+  @@unique([building, floor, name])
+}
+
+model RoomMapping {
+  id        String  @id @default(cuid())
+  roomId    String
+  subjectId String
+  classId   String
+  dayOfWeek Int     // 0 = Sunday .. 6 = Saturday
+  startTime String  // "08:00"
+  endTime   String  // "10:00"
+  room      Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, classId, dayOfWeek, startTime])
+  @@index([subjectId])
+  @@index([classId])
+}
+
+// =====================================================================
+// TASK MANAGEMENT (Student feature)
+// =====================================================================
+
+model Task {
+  id          String   @id @default(cuid())
+  subjectId   String
+  subject     Subject  @relation(fields: [subjectId], references: [id])
+  title       String
+  description String
+  dueDate     DateTime
+  createdById String
+  createdBy   User     @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  completions TaskCompletion[]
+
+  @@index([subjectId])
+  @@index([dueDate])
+}
+
+model TaskCompletion {
+  id       String    @id @default(cuid())
+  taskId   String
+  userId   String
+  done     Boolean   @default(false)
+  doneAt   DateTime?
+  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([userId])
+}
+
+// =====================================================================
+// MATERIALS (Dosen uploads, Student downloads)
+// =====================================================================
+
+model Material {
+  id           String       @id @default(cuid())
+  subjectId    String
+  subject      Subject      @relation(fields: [subjectId], references: [id])
+  title        String
+  description  String?
+  fileUrl      String
+  fileType     MaterialType
+  fileSize     Int?
+  uploadedById String
+  uploadedBy   User         @relation("MaterialUploader", fields: [uploadedById], references: [id])
+  createdAt    DateTime     @default(now())
+
+  @@index([subjectId])
+}
+
+// =====================================================================
+// ANNOUNCEMENTS FEED (Like + Comment)
+// =====================================================================
+
+model Announcement {
+  id        String   @id @default(cuid())
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  classId   String?
+  class     Class?   @relation(fields: [classId], references: [id])
+  title     String
+  body      String
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  likes     Like[]
+  comments  Comment[]
+
+  @@index([classId])
+  @@index([createdAt])
+}
+
+model Like {
+  id             String       @id @default(cuid())
+  announcementId String
+  userId         String
+  createdAt      DateTime     @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+}
+
+model Comment {
+  id             String       @id @default(cuid())
+  announcementId String
+  userId         String
+  body           String
+  createdAt      DateTime     @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([announcementId])
+}
+
+// =====================================================================
+// ATTENDANCE
+// =====================================================================
+
+model AttendanceRecord {
+  id           String           @id @default(cuid())
+  studentId    String
+  student      User             @relation("AttendanceStudent", fields: [studentId], references: [id])
+  classId      String
+  class        Class            @relation(fields: [classId], references: [id])
+  subjectId    String
+  subject      Subject          @relation(fields: [subjectId], references: [id])
+  date         String           // ISO YYYY-MM-DD for simpler querying
+  status       AttendanceStatus
+  recordedById String
+  recordedBy   User             @relation("AttendanceRecorder", fields: [recordedById], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@unique([studentId, classId, subjectId, date])
+  @@index([classId, date])
+}

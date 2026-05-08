@@ -1,29 +1,44 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import Sidebar from '@/components/layout/Sidebar';
-import { AttendanceProvider } from '@/context/AttendanceContext';
+import { ThemeProvider } from '@/context/ThemeContext';
+import { AuthProvider } from '@/context/AuthContext';
+import { DataProvider } from '@/context/DataContext';
+import AppShell from '@/components/layout/AppShell';
 
 export const metadata: Metadata = {
-  title: 'Academic Presence System',
-  description: 'Modern student attendance management system',
+  title: 'AIS — Academic Information System',
+  description: 'Modern role-based academic platform for attendance, materials, tasks, and more.',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+// Inline script that runs BEFORE React hydration.
+// Reads the stored theme (or system preference) and adds `dark` class to <html>
+// so SSR HTML and first client render are visually consistent.
+// This is the standard pattern used by next-themes.
+const themeInitScript = `
+(function() {
+  try {
+    var t = localStorage.getItem('ais-theme');
+    var m = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var isDark = t === 'dark' || ((t === 'system' || !t) && m);
+    if (isDark) document.documentElement.classList.add('dark');
+  } catch (e) {}
+})();
+`;
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>
-        <AttendanceProvider>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <main className="flex-1 ml-64 p-8">
-              {children}
-            </main>
-          </div>
-        </AttendanceProvider>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="antialiased">
+        <ThemeProvider>
+          <AuthProvider>
+            <DataProvider>
+              <AppShell>{children}</AppShell>
+            </DataProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
