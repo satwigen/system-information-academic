@@ -6,19 +6,46 @@
  *   npm i
  *   npm run seed:users
  *
- * Requires in .env.local:
+ * Reads credentials from .env.local (the same file Next.js uses).
+ *
+ * Requires:
  *   NEXT_PUBLIC_SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE_KEY
  */
 
-import 'dotenv/config';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { config as loadDotenv } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+// Load .env.local (Next.js convention) with .env as a secondary fallback.
+const cwd = process.cwd();
+const envLocalPath = resolve(cwd, '.env.local');
+const envPath = resolve(cwd, '.env');
+
+if (existsSync(envLocalPath)) {
+  loadDotenv({ path: envLocalPath });
+} else if (existsSync(envPath)) {
+  loadDotenv({ path: envPath });
+} else {
+  console.error(
+    'No .env.local found in the project root.\n' +
+      'Create it by copying the example:\n' +
+      '    cp .env.local.example .env.local\n' +
+      'Then fill in NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+  );
+  process.exit(1);
+}
+
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!url || !serviceKey) {
-  console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.');
+  console.error(
+    'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local.\n' +
+      `Tried to load: ${envLocalPath}\n` +
+      'Make sure both keys are present and there are no extra spaces or quotes.',
+  );
   process.exit(1);
 }
 
