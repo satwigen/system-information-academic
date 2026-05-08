@@ -81,17 +81,33 @@ export function getRoleBadgeColor(role: Role): string {
 }
 
 // -------------------- Date helpers --------------------
-// HYDRATION-SAFE: these helpers accept a date argument.
-// Never call them at module scope.
+// HYDRATION-SAFE: all formatters are pure functions of the ISO string input
+// and DO NOT depend on the runtime's timezone or locale. This guarantees the
+// server (often UTC) and client (any timezone) produce identical output.
+// Never call them with `new Date()` or `Date.now()` at module scope.
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/**
+ * Formats an ISO date string as "Sun, Nov 10, 2024" using UTC, so the output
+ * is identical on any machine regardless of timezone.
+ */
 export function formatDate(date: string): string {
-  return new Date(date).toLocaleDateString('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  const weekday = WEEKDAYS[d.getUTCDay()];
+  const month = MONTHS[d.getUTCMonth()];
+  const day = d.getUTCDate();
+  const year = d.getUTCFullYear();
+  return `${weekday}, ${month} ${day}, ${year}`;
 }
 
+/**
+ * NOTE: this reads `Date.now()` and therefore MUST only be rendered inside
+ * a ClientOnly wrapper. Do not call from a server component or from the
+ * initial render of a "use client" component without guarding.
+ */
 export function formatRelative(date: string): string {
   const then = new Date(date).getTime();
   const now = Date.now();
