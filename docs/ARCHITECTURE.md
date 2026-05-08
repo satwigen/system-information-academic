@@ -1,304 +1,369 @@
-# Architecture Design — AIS v2.0
+# Architecture — SIAKAD v3.0
 
 ---
 
-## 1. High-Level Architecture
+## 1. Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| Framework | Next.js 14 (App Router) | Server Components first |
+| Language | TypeScript (strict) | — |
+| UI | Tailwind CSS v3.4 (`darkMode: 'class'`) + Framer Motion | — |
+| Icons | Lucide-React | — |
+| **Database** | **Supabase (Postgres 15)** | Hosted |
+| **Auth** | **Supabase Auth** (email + password) | SSR cookies |
+| **Storage** | **Supabase Storage** | Buckets: `avatars`, `materials` |
+| **Authorization** | **Postgres RLS** | Enforced at DB level |
+| **PDF** | `@react-pdf/renderer` | Server-rendered, no hydration impact |
+| Form Validation | Zod | Shared client + server |
+
+---
+
+## 2. High-Level System Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     Client (Browser)                           │
-├──────────────────────────────────────────────────────────────┤
-│  AppShell                                                      │
-│  ├── ThemeProvider (light/dark)                                │
-│  ├── AuthProvider (role: admin|head|dosen|student)             │
-│  ├── DataProvider (departments, rooms, tasks, materials, ...)  │
-│  │                                                             │
-│  ├── Desktop: Collapsible Sidebar (Framer Motion)              │
-│  ├── Mobile:  Floating Glassmorphic Dock (bottom)              │
-│  │                                                             │
-│  └── Page Router (App Router)                                  │
-│      ├── /              → Role-adaptive Dashboard              │
-│      ├── /attendance    → Dosen                                │
-│      ├── /materials     → Dosen + Student                      │
-│      ├── /feed          → All (Student can like/comment)       │
-│      ├── /tasks         → Student                              │
-│      ├── /reports       → Head + Admin                         │
-│      ├── /admin/users   → Admin                                │
-│      ├── /admin/rooms   → Admin (Room Mapping)                 │
-│      └── /profile       → All                                  │
-│                                                                │
-├──────────────────────────────────────────────────────────────┤
-│          Future Backend (Prisma + Supabase)                    │
-│  ├── Postgres (via Supabase)                                   │
-│  ├── Row-Level Security = RBAC                                 │
-│  ├── Supabase Storage (material files, avatars)                │
-│  └── Supabase Auth (email + magic link)                        │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Client (Browser)                               │
+├──────────────────────────────────────────────────────────────────────┤
+│  Server Components (default)                                           │
+│    ├── RootLayout                                                      │
+│    │    ├── ThemeProvider (client)                                     │
+│    │    ├── ToastProvider (client)                                     │
+│    │    └── AppShell (client)                                          │
+│    │                                                                   │
+│    ├── /(auth)/login/page.tsx                                          │
+│    │                                                                   │
+│    └── /(app)/*/page.tsx                                               │
+│         ├── reads via createServerClient()                             │
+│         ├── guarded by middleware.ts                                   │
+│         └── embeds <ClientIsland/> for interactions                    │
+│                                                                        │
+│  Client Components (interactive islands)                               │
+│    ├── CRUD dialogs                                                    │
+│    ├── Attendance grid (optimistic)                                    │
+│    ├── Task toggle                                                     │
+│    ├── Feed post composer / like / comment                             │
+│    └── File upload (stream to Supabase Storage)                        │
+│                                                                        │
+├──────────────────────────────────────────────────────────────────────┤
+│          Next.js Server (Server Actions + Route Handlers)             │
+├──────────────────────────────────────────────────────────────────────┤
+│  Server Actions (preferred)                                            │
+│    └── mutate via createServerClient() — inherits user session         │
+│                                                                        │
+│  Route Handlers (where needed)                                         │
+│    ├── /api/materials/upload    (multipart file)                       │
+│    ├── /api/materials/[id]/download  (signed URL redirect)             │
+│    ├── /api/reports/[type]/pdf  (@react-pdf streaming)                 │
+│    └── /auth/callback           (Supabase PKCE)                        │
+│                                                                        │
+├──────────────────────────────────────────────────────────────────────┤
+│                         Supabase                                       │
+├──────────────────────────────────────────────────────────────────────┤
+│  Auth   (users, sessions, JWT)                                         │
+│  Postgres                                                              │
+│    ├── public.profiles  (1:1 with auth.users)                          │
+│    ├── departments, classes, subjects, rooms, room_mappings            │
+│    ├── attendance_records, materials, tasks, student_tasks             │
+│    └── announcements, likes, comments                                  │
+│  Storage (RLS on storage.objects)                                      │
+│    ├── avatars (public read, owner write)                              │
+│    └── materials (private; signed URLs only)                           │
+│  RLS policies enforce role-based access                                │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Project Structure
+## 3. Route Map
+
+### 3.1 Route Groups
+
+```
+src/app/
+├── (auth)/
+│   ├── login/page.tsx              # public
+│   ├── forgot-password/page.tsx    # public
+│   └── reset/page.tsx              # public (token link)
+│
+├── (app)/                          # middleware-protected
+│   ├── layout.tsx                  # shell + role-aware nav
+│   ├── page.tsx                    # role-adaptive dashboard
+│   ├── attendance/page.tsx         # DOSEN write, STUDENT read-only
+│   ├── materials/page.tsx          # DOSEN upload, STUDENT+DOSEN download
+│   ├── feed/page.tsx               # ALL roles
+│   ├── tasks/page.tsx              # STUDENT mark-done, DOSEN create
+│   ├── reports/page.tsx            # ADMIN, HEAD, DOSEN (scoped)
+│   ├── search/page.tsx             # ADMIN, HEAD, DOSEN
+│   ├── profile/page.tsx            # ALL roles
+│   └── admin/
+│       ├── users/page.tsx          # ADMIN only
+│       ├── departments/page.tsx    # ADMIN only
+│       ├── classes/page.tsx        # ADMIN only
+│       ├── subjects/page.tsx       # ADMIN only
+│       └── rooms/page.tsx          # ADMIN only
+│
+├── api/
+│   ├── auth/callback/route.ts
+│   ├── materials/upload/route.ts
+│   ├── materials/[id]/download/route.ts
+│   └── reports/[type]/pdf/route.ts
+│
+└── middleware.ts                   # refresh session + gate (app)/* + admin/*
+```
+
+### 3.2 Role → Nav Items (corrected)
+
+```ts
+const NAV_BY_ROLE = {
+  ADMIN:   ['dashboard','attendance','materials','feed','reports','search',
+            'admin/users','admin/departments','admin/classes','admin/subjects',
+            'admin/rooms','profile'],
+  HEAD:    ['dashboard','feed','search','reports','profile'],  // NO materials, NO tasks, NO attendance
+  DOSEN:   ['dashboard','attendance','materials','feed','tasks','reports','search','profile'],
+  STUDENT: ['dashboard','attendance','materials','feed','tasks','profile'], // attendance is READ-ONLY
+};
+```
+
+---
+
+## 4. Auth & Session
+
+### 4.1 Supabase Clients
+
+Three distinct client factories, each with a single responsibility:
+
+```
+src/lib/supabase/
+├── client.ts     # createBrowserClient()  — client components
+├── server.ts     # createServerClient()   — RSC, server actions, route handlers
+└── admin.ts      # createServiceClient()  — service role; SERVER ONLY; admin ops
+```
+
+### 4.2 Middleware Flow
+
+```ts
+// middleware.ts  — runs on every (app)/* request
+const { user, session } = await supabase.auth.getUser();   // refreshes cookie
+if (!user) redirect('/login');
+
+// Role-gated sub-trees
+if (pathname.startsWith('/admin')) {
+  const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (data?.role !== 'ADMIN') redirect('/');
+}
+```
+
+### 4.3 Session Source of Truth
+
+- **Server:** `getUser()` from Supabase SSR cookies
+- **Client:** `useUser()` hook subscribes to auth state changes for UI
+- Role is fetched once per request from `profiles.role`, cached in React Context for the page
+
+---
+
+## 5. Data Flow Patterns
+
+### 5.1 Read (page load)
+
+```
+Browser → Next.js RSC → createServerClient()
+                       → supabase.from('materials').select(...)
+                       → RLS filter by profiles.role
+                       → HTML streamed back
+```
+
+### 5.2 Mutation — prefer Server Actions
+
+```tsx
+// page.tsx (server component)
+<EditRoomDialog action={updateRoomAction} room={room} />
+
+// actions.ts  (server action file, 'use server')
+export async function updateRoomAction(id: string, patch: RoomPatch) {
+  const supabase = createServerClient();
+  const { error } = await supabase.from('rooms').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
+  revalidatePath('/admin/rooms');
+}
+```
+
+### 5.3 File Upload — Route Handler (multipart)
+
+Server Actions have a 1 MB body limit; materials go through a route handler:
+
+```
+Client FormData → POST /api/materials/upload (server)
+                 → server validates size ≤ 50 MB + mime type
+                 → supabase.storage.from('materials').upload(...)
+                 → insert row into materials table
+                 → returns { id, filePath }
+```
+
+### 5.4 File Download — signed URL
+
+```
+Client → GET /api/materials/[id]/download
+       → server checks RLS-permitted read
+       → signed URL (valid 60 s)
+       → 302 redirect to signed URL
+```
+
+---
+
+## 6. Auto-Expiry Room Mapping
+
+### 6.1 Design
+
+- Source of truth: `room_mappings` table has `day_of_week` (0-6), `start_time`, `end_time` (time, Asia/Jakarta).
+- Expiry is a **view-time filter**, NOT a data deletion.
+- Admin screen bypasses the filter.
+
+### 6.2 Implementation
+
+**Option A (chosen):** Filter in a Server Component using the request time.
+
+```ts
+// app/(app)/page.tsx  (server component)
+const { nowDay, nowHHMM } = getJakartaNow();   // pure server clock, no hydration risk
+const { data } = await supabase
+  .from('room_mappings_expanded')  // DB view joining room + subject + class
+  .select('*')
+  .or(`day_of_week.neq.${nowDay},end_time.gt.${nowHHMM}`);
+```
+
+Because this runs only on the server, there is no server/client divergence. Further auto-refresh happens via `revalidateTag('room-mappings')` from a cron route handler triggered every 15 min.
+
+### 6.3 Database View
+
+```sql
+create view room_mappings_expanded as
+  select m.*, r.name as room_name, r.building, r.floor,
+         s.name as subject_name, s.code as subject_code,
+         c.name as class_name, c.department_id
+  from room_mappings m
+  join rooms r on m.room_id = r.id
+  join subjects s on m.subject_id = s.id
+  join classes c on m.class_id = c.id;
+```
+
+---
+
+## 7. Storage Buckets
+
+| Bucket | Public | Policy Summary |
+|--------|--------|----------------|
+| `avatars` | Yes (read) | Auth user can upload to `{user_id}/` prefix |
+| `materials` | No | Only authenticated; RLS joins to `materials` table for download permission |
+
+All downloads of `materials` go through signed URLs issued by the server; no direct public URL.
+
+---
+
+## 8. Frontend State Architecture
+
+```
+RootLayout (Server)
+├── ThemeProvider (client)
+├── ToastProvider (client)
+└── AppLayoutClient (client)
+     ├── props: { user, role, profile }  ← fetched on server once
+     ├── Sidebar (reads props)
+     ├── FloatingDock (reads props)
+     └── {children}  ← Server Components fetch their own data
+```
+
+Key change from v2: **no more `DataProvider` client context**. Data lives in Server Components; only transient UI state (dialog open, optimistic attendance) lives in client state.
+
+---
+
+## 9. Hydration Safety (carry-over from v2 + new)
+
+| Rule | Fix |
+|------|-----|
+| No `Math.random()` / `Date.now()` at module scope | Deterministic seed or server-only |
+| No `toLocaleDateString` without explicit `timeZone` | Use UTC or explicit `Asia/Jakarta` |
+| No theme-dependent className differences on first paint | Inline `<script>` in `<head>` |
+| Timestamps that include "now" | `<ClientOnly>` wrap |
+| `useUser()` initial state | Pass `initialUser` from server to avoid flicker |
+
+---
+
+## 10. Project Structure (v3)
 
 ```
 academic-presence-system/
 ├── docs/
 │   ├── PRD.md
-│   └── ARCHITECTURE.md
+│   ├── ARCHITECTURE.md
+│   ├── SUPABASE_SETUP.md          (NEW)
+│   └── API_ROUTES.md              (NEW)
 ├── prisma/
-│   └── schema.prisma            # DB source-of-truth (future migration)
+│   └── schema.prisma              (updated to mirror SQL)
+├── supabase/
+│   ├── migrations/
+│   │   ├── 0001_init.sql          (schema + RLS + functions + view)
+│   │   └── 0002_storage.sql       (bucket policies)
+│   └── seed.sql                   (demo users + departments)
 ├── src/
+│   ├── middleware.ts
 │   ├── app/
-│   │   ├── layout.tsx           # Shell: providers + sidebar + dock
-│   │   ├── page.tsx             # Dashboard (role-adaptive)
-│   │   ├── globals.css
-│   │   ├── attendance/page.tsx
-│   │   ├── materials/page.tsx
-│   │   ├── feed/page.tsx
-│   │   ├── tasks/page.tsx
-│   │   ├── reports/page.tsx
-│   │   ├── search/page.tsx
-│   │   ├── profile/page.tsx
-│   │   └── admin/
-│   │       ├── users/page.tsx
-│   │       ├── departments/page.tsx
-│   │       └── rooms/page.tsx
+│   │   ├── (auth)/
+│   │   ├── (app)/
+│   │   └── api/
 │   ├── components/
-│   │   ├── layout/
-│   │   │   ├── AppShell.tsx
-│   │   │   ├── Sidebar.tsx
-│   │   │   ├── FloatingDock.tsx
-│   │   │   ├── Header.tsx
-│   │   │   ├── ThemeToggle.tsx
-│   │   │   └── RoleSwitcher.tsx
-│   │   ├── ui/
-│   │   │   ├── Card.tsx
-│   │   │   ├── Button.tsx
-│   │   │   ├── Badge.tsx
-│   │   │   ├── Select.tsx
-│   │   │   ├── SearchInput.tsx
-│   │   │   ├── Avatar.tsx
-│   │   │   ├── ProgressRing.tsx
-│   │   │   └── ClientOnly.tsx   # Hydration-safe wrapper
-│   │   └── domain/
-│   │       ├── DepartmentCard.tsx
-│   │       ├── StatsCard.tsx
-│   │       ├── TaskCard.tsx
-│   │       ├── MaterialCard.tsx
-│   │       ├── AnnouncementCard.tsx
-│   │       └── RoomCard.tsx
-│   ├── context/
-│   │   ├── ThemeContext.tsx
-│   │   ├── AuthContext.tsx      # Active role + user
-│   │   └── DataContext.tsx      # Renamed from AttendanceContext
-│   └── lib/
-│       ├── data/                # Deterministic mock data
-│       ├── types.ts
-│       ├── rbac.ts              # Role → allowed nav items
-│       └── utils.ts
-├── package.json
-├── tailwind.config.ts           # darkMode: 'class'
+│   │   ├── layout/                (Sidebar, FloatingDock, Header — read server props)
+│   │   ├── ui/                    (Card, Button, Dialog, Toast, ...)
+│   │   └── domain/                (AttendanceGrid, TaskCard, MaterialUploader, ...)
+│   ├── actions/                   (server actions grouped by entity)
+│   │   ├── users.ts
+│   │   ├── departments.ts
+│   │   ├── rooms.ts
+│   │   ├── materials.ts
+│   │   ├── attendance.ts
+│   │   ├── tasks.ts
+│   │   └── feed.ts
+│   ├── lib/
+│   │   ├── supabase/              (client.ts, server.ts, admin.ts)
+│   │   ├── validation/            (Zod schemas per entity)
+│   │   ├── rbac.ts                (route + nav policy)
+│   │   ├── time.ts                (getJakartaNow, formatDate, formatRelative)
+│   │   └── utils.ts
+│   └── types/
+│       └── database.ts            (generated via `supabase gen types`)
+├── .env.local.example
+├── tailwind.config.ts
+├── next.config.js
 ├── tsconfig.json
-└── next.config.js
+└── package.json
 ```
 
 ---
 
-## 3. Database Schema (Prisma)
+## 11. Environment Variables
 
-```prisma
-// See prisma/schema.prisma for full source
-
-model User {
-  id          String   @id
-  role        Role
-  email       String   @unique
-  profile     Profile?
-  classId     String?
-  class       Class?   @relation(fields: [classId], references: [id])
-  deptId      String?
-  dept        Department? @relation(fields: [deptId], references: [id])
-  tasks       TaskCompletion[]
-  comments    Comment[]
-  likes       Like[]
-  attendance  AttendanceRecord[]
-}
-
-model Profile {
-  userId    String  @id
-  user      User    @relation(fields: [userId], references: [id])
-  fullName  String
-  phone     String?
-  address   String?
-  avatarUrl String?
-}
-
-enum Role { ADMIN  HEAD  DOSEN  STUDENT }
-
-model Department { id, name, code, headId }
-model Class      { id, deptId, name, semester }
-model Subject    { id, deptId, name, code, credits }
-
-model Room {
-  id       String @id
-  name     String   // "Lab 1"
-  building String   // "Building A"
-  floor    Int      // 2
-  capacity Int
-  type     RoomType
-}
-enum RoomType { LAB  CLASSROOM  AUDITORIUM }
-
-model RoomMapping {
-  id        String @id
-  roomId    String
-  subjectId String
-  classId   String
-  dayOfWeek Int
-  startTime String
-  endTime   String
-  @@unique([roomId, classId, dayOfWeek, startTime])
-}
-
-model Task {
-  id         String @id
-  subjectId  String
-  title      String
-  description String
-  dueDate    DateTime
-  createdBy  String
-  completions TaskCompletion[]
-}
-model TaskCompletion {
-  id        String @id
-  taskId    String
-  userId    String
-  done      Boolean @default(false)
-  doneAt    DateTime?
-  @@unique([taskId, userId])
-}
-
-model Material {
-  id        String @id
-  subjectId String
-  title     String
-  fileUrl   String
-  fileType  String
-  uploadedBy String
-  createdAt DateTime @default(now())
-}
-
-model Announcement {
-  id        String @id
-  authorId  String
-  classId   String?
-  deptId    String?
-  title     String
-  body      String
-  createdAt DateTime @default(now())
-  comments  Comment[]
-  likes     Like[]
-}
-model Like    { id, announcementId, userId, createdAt }
-model Comment { id, announcementId, userId, body, createdAt }
-
-model AttendanceRecord {
-  id         String @id
-  studentId  String
-  classId    String
-  subjectId  String
-  date       String
-  status     AttendanceStatus
-  recordedBy String
-}
-enum AttendanceStatus { PRESENT  LATE  SICK  ABSENT }
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=        # server only, never shipped to client
+NEXT_PUBLIC_SITE_URL=             # used for magic-link redirects
 ```
 
----
-
-## 4. Hydration-Safe Strategy
-
-### 4.1 The Problem
-The previous `attendance.ts` mock used `Math.random()` at module load time. When Next.js pre-renders the page on the server and hydrates on the client, the two random outputs differ → **hydration mismatch**.
-
-### 4.2 The Fix (3 layers)
-
-1. **Deterministic mock data** — replace `Math.random()` with a seeded pseudo-random function so server and client produce identical arrays.
-   ```ts
-   // Mulberry32 deterministic PRNG
-   function seeded(seed: number) {
-     return () => {
-       seed = (seed + 0x6D2B79F5) | 0;
-       let t = seed;
-       t = Math.imul(t ^ (t >>> 15), t | 1);
-       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-     };
-   }
-   ```
-
-2. **`ClientOnly` wrapper** — for UI that inherently varies (current date, theme class before mount), render only after `useEffect` runs.
-   ```tsx
-   export default function ClientOnly({ children, fallback = null }) {
-     const [mounted, setMounted] = useState(false);
-     useEffect(() => setMounted(true), []);
-     return mounted ? <>{children}</> : <>{fallback}</>;
-   }
-   ```
-
-3. **Theme class applied via `<script>` in `<head>`** — prevents FOUC and matches SSR HTML.
-
-### 4.3 Forbidden during SSR
-- `Math.random()` at module scope
-- `Date.now()` / `new Date()` for initial state
-- `window`, `document`, `localStorage` at render time
-- Any conditional rendering based on `typeof window`
+`SUPABASE_SERVICE_ROLE_KEY` is referenced only in `src/lib/supabase/admin.ts`, which is never imported by a client component.
 
 ---
 
-## 5. RBAC (Role-Based Access Control)
+## 12. Deployment
 
-```ts
-// src/lib/rbac.ts
-export const navByRole = {
-  ADMIN:   ['dashboard','users','departments','rooms','reports','profile'],
-  HEAD:    ['dashboard','reports','feed','materials','profile'],
-  DOSEN:   ['dashboard','attendance','materials','feed','tasks','profile'],
-  STUDENT: ['dashboard','materials','feed','tasks','attendance','profile'],
-};
-```
-
-Each page performs `useAuth()` → checks `role` → renders content or redirects.
+- **Host:** Vercel
+- **DB migrations:** `supabase db push` from CI after PR merge
+- **Type generation:** `supabase gen types typescript --project-id ... > src/types/database.ts` runs in CI
 
 ---
 
-## 6. Navigation UX
+## 13. Future (Out of v3.0 Scope)
 
-### Desktop Sidebar
-- Width 256px (expanded) / 72px (collapsed)
-- Toggle with Framer Motion `layout` prop for smooth width animation
-- Icons always visible; labels fade in when expanded
-- Role-filtered nav items
-
-### Mobile Floating Dock
-- Fixed bottom-center, `backdrop-blur-xl`, `rounded-2xl`
-- 5 primary icons with active indicator (Framer Motion `layoutId`)
-- Glassmorphic: `bg-white/70 dark:bg-slate-900/70 border border-white/20`
-
----
-
-## 7. Theme System
-
-- `next-themes` pattern with `darkMode: 'class'` in Tailwind
-- Inline `<script>` in `<head>` sets `<html class="dark">` before React hydrates
-- `ThemeProvider` exposes `theme` and `setTheme`
-- `localStorage` persistence
-
----
-
-## 8. Future Extensions (Out of current scope)
-- Real Supabase auth integration
-- Real-time feed updates via Supabase Realtime
-- File uploads to Supabase Storage
-- Email notifications on new announcements
-- Exporting reports to PDF
+- Real-time subscriptions on feed
+- Supabase Edge Functions for scheduled report digests
+- Multi-institution tenancy
+- Mobile native app sharing the same Supabase

@@ -1,6 +1,15 @@
-// Academic Information System — Database Schema
-// Source-of-truth for future Supabase/Postgres migration.
-// Current app uses mock data in src/lib/data/* mirroring these relations.
+// =====================================================================
+// SIAKAD v3.0 — Prisma schema (mirror of supabase/migrations/0001_init.sql)
+// =====================================================================
+//
+// This file is a reference representation of the database for tooling
+// (Prisma Studio, type introspection). The source of truth is the SQL
+// migration at supabase/migrations/0001_init.sql. If the two disagree,
+// the SQL wins.
+//
+// RLS, triggers, views, and storage policies are NOT expressible in
+// Prisma; see docs/SUPABASE_SETUP.md for the full Postgres-level setup.
+// =====================================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -11,22 +20,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// =====================================================================
-// ENUMS
-// =====================================================================
+// ------------------------- ENUMS -------------------------
 
-enum Role {
+enum UserRole {
   ADMIN
   HEAD
   DOSEN
   STUDENT
-}
 
-enum RoomType {
-  LAB
-  CLASSROOM
-  AUDITORIUM
-  SEMINAR_ROOM
+  @@map("user_role")
 }
 
 enum AttendanceStatus {
@@ -34,6 +36,17 @@ enum AttendanceStatus {
   LATE
   SICK
   ABSENT
+
+  @@map("attendance_status")
+}
+
+enum RoomType {
+  LAB
+  CLASSROOM
+  AUDITORIUM
+  SEMINAR_ROOM
+
+  @@map("room_type")
 }
 
 enum MaterialType {
@@ -42,245 +55,354 @@ enum MaterialType {
   VIDEO
   LINK
   DOCUMENT
+
+  @@map("material_type")
 }
 
-// =====================================================================
-// USER & PROFILE
-// =====================================================================
-
-model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  role          Role
-  // Optional assignments
-  classId       String?
-  deptId        String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  // Relations
-  profile              Profile?
-  class                Class?            @relation("ClassStudents", fields: [classId], references: [id])
-  department           Department?       @relation("DeptMembers", fields: [deptId], references: [id])
-  headedDepartment     Department?       @relation("DeptHead")
-  announcements        Announcement[]
-  comments             Comment[]
-  likes                Like[]
-  taskCompletions      TaskCompletion[]
-  createdTasks         Task[]            @relation("TaskCreator")
-  uploadedMaterials    Material[]        @relation("MaterialUploader")
-  recordedAttendance   AttendanceRecord[] @relation("AttendanceRecorder")
-  ownAttendance        AttendanceRecord[] @relation("AttendanceStudent")
-
-  @@index([role])
-  @@index([deptId])
-}
+// ------------------------- PROFILES -------------------------
+// Mirrors public.profiles. The `id` matches auth.users(id); the auth
+// table is managed by Supabase and is not represented here.
 
 model Profile {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fullName  String
-  phone     String?
-  address   String?
-  avatarUrl String?
-  bio       String?
-  updatedAt DateTime @updatedAt
+  id           String   @id @db.Uuid
+  role         UserRole @default(STUDENT)
+  fullName     String   @map("full_name")
+  email        String   @unique
+  phone        String?
+  address      String?
+  avatarUrl    String?  @map("avatar_url")
+  bio          String?
+
+  classId      String?  @map("class_id")      @db.Uuid
+  class        Class?   @relation("ClassStudents", fields: [classId], references: [id], onDelete: SetNull)
+
+  departmentId String?  @map("department_id") @db.Uuid
+  department   Department? @relation("DepartmentMembers", fields: [departmentId], references: [id], onDelete: SetNull)
+
+  nim          String?  @unique
+  nip          String?  @unique
+
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse relations
+  headedDepartment   Department?        @relation("DepartmentHead")
+  attendanceAsStudent AttendanceRecord[] @relation("AttendanceStudent")
+  attendanceRecorded  AttendanceRecord[] @relation("AttendanceRecorder")
+  materialsUploaded   Material[]         @relation("MaterialUploader")
+  tasksCreated        Task[]             @relation("TaskCreator")
+  studentTasks        StudentTask[]
+  announcements       Announcement[]
+  likes               Like[]
+  comments            Comment[]
+
+  @@index([role])
+  @@index([departmentId])
+  @@index([classId])
+  @@map("profiles")
 }
 
-// =====================================================================
-// ACADEMIC STRUCTURE
-// =====================================================================
+// ------------------------- DEPARTMENTS -------------------------
 
 model Department {
-  id          String   @id @default(cuid())
-  code        String   @unique
+  id          String  @id @default(uuid()) @db.Uuid
+  code        String  @unique
   name        String
   description String?
   icon        String?
-  headId      String?  @unique
-  head        User?    @relation("DeptHead", fields: [headId], references: [id])
-  members     User[]   @relation("DeptMembers")
-  classes     Class[]
-  subjects    Subject[]
+
+  headId      String? @unique @map("head_id") @db.Uuid
+  head        Profile? @relation("DepartmentHead", fields: [headId], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse relations
+  members   Profile[] @relation("DepartmentMembers")
+  classes   Class[]
+  subjects  Subject[]
+
+  @@index([headId])
+  @@map("departments")
 }
+
+// ------------------------- CLASSES -------------------------
 
 model Class {
-  id           String   @id @default(cuid())
-  deptId       String
-  department   Department @relation(fields: [deptId], references: [id])
+  id           String  @id @default(uuid()) @db.Uuid
+  departmentId String  @map("department_id") @db.Uuid
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
   name         String
   semester     Int
-  students     User[]   @relation("ClassStudents")
+
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse relations
+  students     Profile[]          @relation("ClassStudents")
   roomMappings RoomMapping[]
   attendance   AttendanceRecord[]
+  materials    Material[]
+  tasks        Task[]
   announcements Announcement[]
 
-  @@unique([deptId, name])
+  @@unique([departmentId, name])
+  @@index([departmentId])
+  @@map("classes")
 }
+
+// ------------------------- SUBJECTS (COURSES) -------------------------
 
 model Subject {
-  id           String   @id @default(cuid())
-  deptId       String
-  department   Department @relation(fields: [deptId], references: [id])
+  id           String  @id @default(uuid()) @db.Uuid
+  departmentId String  @map("department_id") @db.Uuid
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  code         String  @unique
   name         String
-  code         String   @unique
   credits      Int
+
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse relations
   roomMappings RoomMapping[]
-  tasks        Task[]
-  materials    Material[]
   attendance   AttendanceRecord[]
+  materials    Material[]
+  tasks        Task[]
+
+  @@index([departmentId])
+  @@map("subjects")
 }
 
-// =====================================================================
-// ROOM MAPPING SYSTEM (Admin feature)
-// =====================================================================
+// ------------------------- ROOMS -------------------------
 
 model Room {
-  id       String   @id @default(cuid())
-  name     String                   // "Lab 1", "Room 304"
-  building String                   // "Building A"
-  floor    Int                      // 2
-  capacity Int
-  type     RoomType
-  notes    String?
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  building  String
+  floor     Int
+  capacity  Int
+  type      RoomType @default(CLASSROOM)
+  notes     String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse relations
   mappings RoomMapping[]
 
   @@unique([building, floor, name])
+  @@map("rooms")
 }
+
+// ------------------------- ROOM MAPPINGS -------------------------
+// Weekly recurring slot. Note: `start_time`/`end_time` are Postgres `time`;
+// Prisma lacks a native `time` type, so we represent as String in the shape
+// "HH:MM:SS". The underlying column is declared `time` in SQL.
 
 model RoomMapping {
-  id        String  @id @default(cuid())
-  roomId    String
-  subjectId String
-  classId   String
-  dayOfWeek Int     // 0 = Sunday .. 6 = Saturday
-  startTime String  // "08:00"
-  endTime   String  // "10:00"
-  room      Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  id         String @id @default(uuid()) @db.Uuid
 
-  @@unique([roomId, classId, dayOfWeek, startTime])
-  @@index([subjectId])
+  roomId     String @map("room_id")    @db.Uuid
+  room       Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  subjectId  String @map("subject_id") @db.Uuid
+  subject    Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  classId    String @map("class_id")   @db.Uuid
+  class      Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  dayOfWeek  Int    @map("day_of_week")
+  startTime  String @map("start_time") @db.Time(0)
+  endTime    String @map("end_time")   @db.Time(0)
+
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([roomId, dayOfWeek, startTime], name: "room_mappings_unique_slot")
   @@index([classId])
+  @@index([subjectId])
+  @@index([roomId])
+  @@index([dayOfWeek])
+  @@map("room_mappings")
 }
 
-// =====================================================================
-// TASK MANAGEMENT (Student feature)
-// =====================================================================
+// ------------------------- ATTENDANCE -------------------------
+
+model AttendanceRecord {
+  id             String @id @default(uuid()) @db.Uuid
+
+  studentId      String @map("student_id") @db.Uuid
+  student        Profile @relation("AttendanceStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  classId        String @map("class_id") @db.Uuid
+  class          Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  subjectId      String @map("subject_id") @db.Uuid
+  subject        Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  sessionDate    DateTime @map("session_date") @db.Date
+  status         AttendanceStatus
+
+  recordedById   String @map("recorded_by_id") @db.Uuid
+  recordedBy     Profile @relation("AttendanceRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([studentId, classId, subjectId, sessionDate])
+  @@index([studentId])
+  @@index([classId, sessionDate])
+  @@index([subjectId])
+  @@map("attendance_records")
+}
+
+// ------------------------- MATERIALS -------------------------
+
+model Material {
+  id             String @id @default(uuid()) @db.Uuid
+
+  classId        String @map("class_id") @db.Uuid
+  class          Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  subjectId      String @map("subject_id") @db.Uuid
+  subject        Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  sessionDate    DateTime @map("session_date") @db.Date
+  title          String
+  description    String?
+
+  fileType       MaterialType @default(PDF)             @map("file_type")
+  filePath       String                                 @map("file_path")
+  fileSizeBytes  BigInt?                                @map("file_size_bytes")
+  mimeType       String?                                @map("mime_type")
+
+  uploadedById   String @map("uploaded_by_id") @db.Uuid
+  uploadedBy     Profile @relation("MaterialUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  @@index([classId])
+  @@index([subjectId])
+  @@index([sessionDate])
+  @@map("materials")
+}
+
+// ------------------------- TASKS -------------------------
 
 model Task {
-  id          String   @id @default(cuid())
-  subjectId   String
-  subject     Subject  @relation(fields: [subjectId], references: [id])
-  title       String
-  description String
-  dueDate     DateTime
-  createdById String
-  createdBy   User     @relation("TaskCreator", fields: [createdById], references: [id])
-  createdAt   DateTime @default(now())
-  completions TaskCompletion[]
+  id            String @id @default(uuid()) @db.Uuid
 
-  @@index([subjectId])
+  classId       String @map("class_id") @db.Uuid
+  class         Class  @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  subjectId     String @map("subject_id") @db.Uuid
+  subject       Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  title         String
+  description   String
+  dueDate       DateTime @map("due_date") @db.Timestamptz(6)
+
+  createdById   String @map("created_by_id") @db.Uuid
+  createdBy     Profile @relation("TaskCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  // Reverse
+  completions   StudentTask[]
+
+  @@index([classId])
   @@index([dueDate])
+  @@map("tasks")
 }
 
-model TaskCompletion {
-  id       String    @id @default(cuid())
-  taskId   String
-  userId   String
-  done     Boolean   @default(false)
-  doneAt   DateTime?
-  task     Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+// ------------------------- STUDENT TASKS (mark-as-done) -------------------------
+
+model StudentTask {
+  id         String    @id @default(uuid()) @db.Uuid
+
+  taskId     String    @map("task_id") @db.Uuid
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  userId     String    @map("user_id") @db.Uuid
+  user       Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  isDone     Boolean   @default(false) @map("is_done")
+  doneAt     DateTime? @map("done_at") @db.Timestamptz(6)
+
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt       @map("updated_at") @db.Timestamptz(6)
 
   @@unique([taskId, userId])
   @@index([userId])
+  @@index([taskId])
+  @@map("student_tasks")
 }
 
-// =====================================================================
-// MATERIALS (Dosen uploads, Student downloads)
-// =====================================================================
-
-model Material {
-  id           String       @id @default(cuid())
-  subjectId    String
-  subject      Subject      @relation(fields: [subjectId], references: [id])
-  title        String
-  description  String?
-  fileUrl      String
-  fileType     MaterialType
-  fileSize     Int?
-  uploadedById String
-  uploadedBy   User         @relation("MaterialUploader", fields: [uploadedById], references: [id])
-  createdAt    DateTime     @default(now())
-
-  @@index([subjectId])
-}
-
-// =====================================================================
-// ANNOUNCEMENTS FEED (Like + Comment)
-// =====================================================================
+// ------------------------- FEED: announcements, likes, comments -------------------------
 
 model Announcement {
-  id        String   @id @default(cuid())
-  authorId  String
-  author    User     @relation(fields: [authorId], references: [id])
-  classId   String?
-  class     Class?   @relation(fields: [classId], references: [id])
-  title     String
-  body      String
-  pinned    Boolean  @default(false)
-  createdAt DateTime @default(now())
-  likes     Like[]
-  comments  Comment[]
+  id            String   @id @default(uuid()) @db.Uuid
+
+  authorId      String   @map("author_id") @db.Uuid
+  author        Profile  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  classId       String?  @map("class_id") @db.Uuid
+  class         Class?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+
+  departmentId  String?  @map("department_id") @db.Uuid
+  // department relation omitted for brevity; announcements reference depts by id only.
+
+  title         String
+  body          String
+  pinned        Boolean  @default(false)
+
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
+
+  likes         Like[]
+  comments      Comment[]
 
   @@index([classId])
-  @@index([createdAt])
+  @@index([departmentId])
+  @@index([createdAt(sort: Desc)])
+  @@map("announcements")
 }
 
 model Like {
-  id             String       @id @default(cuid())
-  announcementId String
-  userId         String
-  createdAt      DateTime     @default(now())
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String @id @default(uuid()) @db.Uuid
+
+  announcementId  String @map("announcement_id") @db.Uuid
+  announcement    Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  userId          String @map("user_id") @db.Uuid
+  user            Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([announcementId, userId])
+  @@index([announcementId])
+  @@map("likes")
 }
 
 model Comment {
-  id             String       @id @default(cuid())
-  announcementId String
-  userId         String
-  body           String
-  createdAt      DateTime     @default(now())
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String @id @default(uuid()) @db.Uuid
+
+  announcementId  String @map("announcement_id") @db.Uuid
+  announcement    Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  userId          String @map("user_id") @db.Uuid
+  user            Profile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  body            String
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt       @map("updated_at") @db.Timestamptz(6)
 
   @@index([announcementId])
-}
-
-// =====================================================================
-// ATTENDANCE
-// =====================================================================
-
-model AttendanceRecord {
-  id           String           @id @default(cuid())
-  studentId    String
-  student      User             @relation("AttendanceStudent", fields: [studentId], references: [id])
-  classId      String
-  class        Class            @relation(fields: [classId], references: [id])
-  subjectId    String
-  subject      Subject          @relation(fields: [subjectId], references: [id])
-  date         String           // ISO YYYY-MM-DD for simpler querying
-  status       AttendanceStatus
-  recordedById String
-  recordedBy   User             @relation("AttendanceRecorder", fields: [recordedById], references: [id])
-  createdAt    DateTime         @default(now())
-
-  @@unique([studentId, classId, subjectId, date])
-  @@index([classId, date])
+  @@map("comments")
 }
